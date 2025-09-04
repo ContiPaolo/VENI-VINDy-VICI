@@ -8,7 +8,7 @@ logging.basicConfig()
 logging.getLogger().setLevel(logging.INFO)
 
 
-class VAESindy(AutoencoderSindy):
+class VENI(AutoencoderSindy):
 
     def __init__(self, beta, **kwargs):
         """
@@ -21,14 +21,14 @@ class VAESindy(AutoencoderSindy):
             self._init_to_config(locals())
         assert isinstance(beta, float) or isinstance(beta, int), "beta must be a float"
         self.beta = beta
-        super(VAESindy, self).__init__(**kwargs)
+        super(VENI, self).__init__(**kwargs)
 
     def create_loss_trackers(self):
         """
         Creates the loss trackers for the model
         :return:
         """
-        super(VAESindy, self).create_loss_trackers()
+        super(VENI, self).create_loss_trackers()
         self.loss_trackers["kl"] = tf.keras.metrics.Mean(name="kl_loss")
 
     def build_encoder(self, x):

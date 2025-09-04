@@ -1,5 +1,7 @@
 import numpy as np
 import os
+import matplotlib.pyplot as plt
+import imageio
 
 
 def add_lognormal_noise(trajectory, sigma):
@@ -55,3 +57,36 @@ def coefficient_distributions_to_csv(sindy_layer, outdir, var_names=[], param_na
             header=",".join(np.array(range(len(feature_names))).astype(str)),
         )
 
+
+def coefficient_distribution_gif(
+    mean_over_epochs, scale_over_epochs, sindy_layer, outdir, model_name, config
+):
+    """
+    Create a gif showing how the coefficient distributions evolve over time
+    """
+    os.makedirs(os.path.join(outdir, "coefficients"), exist_ok=True)
+    # create gif showing how the coefficient distributions evolve over time
+    for i, (mean_, scale_) in enumerate(zip(mean_over_epochs, scale_over_epochs)):
+        # if i % 10 == 0:
+        if i <= 400:
+            x_range = 1.5  # - (1.5 * i / len(mean_over_epochs))
+            # dont show figure
+            fig = sindy_layer._visualize_coefficients(
+                mean_, scale_, x_range=[-x_range, x_range], y_range=[0, 6]
+            )
+            # fig title
+            fig.suptitle(f"Epoch {i}")
+            # save fig as frame for gif
+            fig.savefig(os.path.join(outdir, "coefficients", f"coeffs_{i}.png"))
+            plt.close(fig)
+    # make gif from frames
+    images = []
+    for i in range(0, 400, 1):
+        images.append(
+            imageio.imread(os.path.join(outdir, "coefficients", f"coeffs_{i}.png"))
+        )
+    imageio.mimsave(
+        os.path.join(config.outdir, "coefficients", "coeffs.gif"),
+        images,
+        duration=100,
+    )
