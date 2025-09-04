@@ -31,7 +31,6 @@ matplotlib.use("TkAgg")
 """
 
 
-
 def roessler(t, x0, a=0.2, b=0.2, c=5.7):
     x, y, z = x0
     return [-y - z, x + a * y, b + z * (x - c)]
@@ -50,7 +49,7 @@ def lorenz(t, x0, a=10, b=28, c=8 / 3):
     return [a * (y - x), x * (b - z) - y, x * y - c * z]
 
 
-# Let's define some general script parameters including the noise factors, the number of training and test trajectories, and the random seed. We will also define the type of SINDy model we want to use (VINDy or SINDy) and the model name (Roessler or LV). With the following setup we train our system on data with measurement noise and model noise. We will also use random initial conditions and parameters for the Roessler system.
+# Let's define some general script parameters including the noise factors, the number of training and identification_layer trajectories, and the random seed. We will also define the type of SINDy model we want to use (VINDy or SINDy) and the model name (Roessler or LV). With the following setup we train our system on data with measurement noise and model noise. We will also use random initial conditions and parameters for the Roessler system.
 
 # In[33]:
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -66,7 +65,7 @@ random_a = True  # use random parameters (a in the Roessler system)
 measurement_noise_factor = 0  # 0.01  # measurement noise factor
 model_noise_factor = 0  # 0.1  # model noise factor
 n_train = 100  # number of training trajectories
-n_test = 3  # number of test trajectories
+n_test = 3  # number of identification_layer trajectories
 include_bias = True  # include bias term in the library
 epochs = 1500  # number of epochs for training
 train = True
@@ -400,7 +399,7 @@ for key, value in save_data.items():
 # distributions
 save_values = dict()
 for scenario_info, data in save_data.items():
-    # training and test data
+    # training and identification_layer data
     n_ics = len(data["x"])
     states = np.concatenate(data["x"][:, ::nth_step], axis=1)
     state_headers = [f"{var_names[i]}_{j}" for j in range(n_ics) for i in range(dim)]

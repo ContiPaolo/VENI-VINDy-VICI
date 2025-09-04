@@ -15,7 +15,7 @@ from vindy.distributions import Gaussian, Laplace
 from vindy.callbacks import (
     SaveCoefficientsCallback,
 )
-from utils import load_beam_data
+from utils import load_beam_data, plot_train_history, plot_coefficients_train_history
 
 # Add the examples folder to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -40,12 +40,10 @@ logging.info(
 # %% script parameters
 # Load config
 model_name = "beam"
-test = "vindy"  # 'vindy' or 'sindy'
+identification_layer = "vindy"  # 'vindy' or 'sindy'
 # Script parameter
 reduced_order = 1
 pca_order = 3
-convolutional = False
-numerical_derivatives = True
 noise = True
 nth_time_step = 3
 second_order = True
@@ -61,6 +59,7 @@ end_time_step = 14000
 result_dir = os.path.join(os.path.dirname(__file__), "results")
 
 if noise:
+    # for storage reasons we just load the pca components and not the full noisy data
     (
         t,
         params,
@@ -116,6 +115,7 @@ else:
 
 n_timesteps_test = x_test.shape[0] // n_sims
 n_dof = x.shape[1]
+dt = t[1] - t[0]
 
 # %% Create Model
 logging.info(
@@ -123,16 +123,9 @@ logging.info(
 )
 logging.info("Creating model")
 
-libraries = [
-    PolynomialLibrary(3),
-]
-param_libraries = [
-    ForceLibrary(functions=[tf.cos])
-    # PolynomialLibrary(1, include_bias=False),
-]
-dt = t[1] - t[0]
+libraries = [PolynomialLibrary(3)]
+param_libraries = [ForceLibrary(functions=[tf.cos])]
 
-kernel_regularizer = tf.keras.regularizers.L1L2(l1=1e-8, l2=0)
 
 # create sindy layer
 layer_params = dict(
@@ -142,21 +135,20 @@ layer_params = dict(
     second_order=second_order,
     param_feature_libraries=param_libraries,
     x_mu_interaction=False,
-    kernel_regularizer=kernel_regularizer,
+    kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-8, l2=0),
     mask=None,
     fixed_coeffs=None,
 )
-if test == "vindy":
+if identification_layer == "vindy":
     sindy_layer = VindyLayer(
         beta=beta_vindy,
         priors=Laplace(0.0, 1.0),
-        # priors=Laplace(0., 1.),
         **layer_params,
     )
-elif test == "sindy":
+elif identification_layer == "sindy":
     sindy_layer = SindyLayer(**layer_params)
 else:
-    raise ValueError('test must be either "vindy" or "sindy"')
+    raise ValueError('identification_layer must be either "vindy" or "sindy"')
 
 veni = VENI(
     sindy_layer=sindy_layer,
@@ -171,21 +163,11 @@ veni = VENI(
     l_rec=l_rec,
     l_dz=l_dz,
     l_dx=l_dx,
-    l1=0,
-    l2=0,
-    l_int=0,
     dt=dt,
 )
 
-# learning rate scheduler
-veni.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=2e-3),
-    # sindy_optimizer=tf.keras.optimizers.Adam(learning_rate=5e-3),
-    loss="mse",
-)
 
-
-### Scale data
+# %% Scale data
 veni.define_scaling(x)
 x_train_scaled, dxdt_train_scaled, dxddt_train_scaled = (
     veni.scale(x),
@@ -198,30 +180,27 @@ x_test_scaled, dxdt_test_scaled, dxddt_test_scaled = (
     veni.scale(dxddt_test),
 )
 
-if second_order:
-    x_input = [
-        x_train_scaled[: 24 * n_timesteps],
-        dxdt_train_scaled[: 24 * n_timesteps],
-        dxddt_train_scaled[: 24 * n_timesteps],
-        # x_int[: 30 * n_timesteps],
-        # dx_int[: 30 * n_timesteps],
-        params[: 24 * n_timesteps],
-        # param_int[: 30 * n_timesteps],
-    ]
-    x_input_val = [
-        x_train_scaled[24 * n_timesteps :],
-        dxdt_train_scaled[24 * n_timesteps :],
-        dxddt_train_scaled[24 * n_timesteps :],
-        # x_int[: 30 * n_timesteps],
-        # dx_int[: 30 * n_timesteps],
-        params[24 * n_timesteps :],
-        # param_int[: 30 * n_timesteps],
-    ]
-else:
-    # x_input = [x_train_scaled, dxdt_train_scaled, x_int, params, param_int]
-    x_input = [x_train_scaled, dxdt_train_scaled, params]
+x_input = [
+    x_train_scaled[: 24 * n_timesteps],
+    dxdt_train_scaled[: 24 * n_timesteps],
+    dxddt_train_scaled[: 24 * n_timesteps],
+    params[: 24 * n_timesteps],
+]
+x_input_val = [
+    x_train_scaled[24 * n_timesteps :],
+    dxdt_train_scaled[24 * n_timesteps :],
+    dxddt_train_scaled[24 * n_timesteps :],
+    params[24 * n_timesteps :],
+]
 
+# compile and build
+veni.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=2e-3),
+    # sindy_optimizer=tf.keras.optimizers.Adam(learning_rate=5e-3),
+    loss="mse",
+)
 veni.build(input_shape=([input.shape for input in x_input], None))
+
 
 # %% Train model
 logging.info("Training model")
@@ -233,14 +212,13 @@ log_dir = os.path.join(
 )
 weights_path = os.path.join(
     result_dir,
-    f"{model_name}/{model_name}_{reduced_order}_{veni.__class__.__name__}_{test}.weights.h5",
+    f"{model_name}/{model_name}_{reduced_order}_{veni.__class__.__name__}_{identification_layer}.weights.h5",
 )
 outdir = os.path.join(result_dir, f"{model_name}")
 if not outdir:
     os.mkdir(outdir)
 
 if load_model:
-    # veni = VENI.load(VENI, x=x, mu=params, path=weights_path)
     veni.load_weights(
         os.path.join(weights_path)
     )  # kwargs_overwrite=dict(l_rec=1e0, l_dz=2e3, l_dx=1e-2, l1=0, l2=0, l_int=0))
@@ -249,7 +227,6 @@ if load_model:
     # coefficient_distributions_to_csv(
     #     sindy_layer, outdir, var_names=["z", r"\stackrel{.}{z}"]
     # )
-    sindy_layer.pdf_thresholding(threshold=1.5)
 else:
     # save model config to file
     # veni.save(weights_path)
@@ -265,12 +242,6 @@ else:
     )
     callbacks.append(tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1))
     callbacks.append(SaveCoefficientsCallback())
-    # callbacks.append(SindyCallback(x=x, dxdt=dxdt, dxddt=dxddt, thresholder="l1", threshold=1e-3, print_precision=4,
-    #                                mu=params, t=t[:n_timesteps], freq=1000, train_end=False, ensemble=True,
-    #                                n_subsets=100))
-    # callbacks.append(PDFThresholdCallback(freq=5000, threshhold=500, on_train_end=True))
-    # callbacks.append(SindyCallback(x=x, dxdt=dxdt, dxddt=dxddt, thresholder="l1", threshold=.1, print_precision=6,
-    #                                mu=params, t=t[:n_timesteps], freq=50, train_end=False))
 
     # veni.load_weights(os.path.join(weights_path))
     trainhist = veni.fit(
@@ -285,48 +256,44 @@ else:
 
     # save trainhist
     np.save(
-        os.path.join(result_dir, f"{model_name}/trainhist_{test}.npy"),
+        os.path.join(result_dir, f"{model_name}/trainhist_{identification_layer}.npy"),
         trainhist.history,
     )
     # load trainhist
     trainhist = np.load(
-        os.path.join(result_dir, f"{model_name}/trainhist_{test}.npy"),
+        os.path.join(result_dir, f"{model_name}/trainhist_{identification_layer}.npy"),
         allow_pickle=True,
     ).item()
-
-    plt.plot(np.array(trainhist["coeffs_mean"]).squeeze())
-    plt.plot(np.array(trainhist["coeffs_scale"]).squeeze())
-
-    plt.figure()
-    plt.semilogy(trainhist["loss"])
-    plt.semilogy(trainhist["rec"])
-    plt.semilogy(trainhist["dz"])
-    plt.semilogy(trainhist["dx"])
-    plt.semilogy(trainhist["kl"])
-    plt.semilogy(trainhist["kl_sindy"])
-    plt.legend(["loss", "rec", "dz", "dx", "kl_loss", "kl_sindy"])
-
-    plt.semilogy(trainhist["val_loss"])
 
     mean_over_epochs = np.array(trainhist["coeffs_mean"]).squeeze()
     scale_over_epochs = np.array(trainhist["coeffs_scale"]).squeeze()
 
+    plot_coefficients_train_history(trainhist, outdir)
+
+    plot_train_history(trainhist, outdir, validation=True)
+    plot_train_history(trainhist, outdir, validation=False)
+
     veni.print(z=["z", "dz"], precision=4)
-    coeffs = veni.sindy_coeffs()
 
     # save model
-    if not os.path.isdir(os.path.join(outdir, f"{model_name}")):
-        os.mkdir(os.path.join(outdir, f"{model_name}"))
+    os.mkdir(os.path.join(outdir, f"{model_name}"), exist_ok=True)
     veni.save(weights_path)
 
 # %% Plot training history
+
+# reconstruction of PCA trajectories
 veni.vis_modes(x_test_scaled, 4)
 veni.vis_modes(x_train_scaled, 4)
 
 sindy_layer.visualize_coefficients(x_range=[-0.5, 0.5])
 plt.show()
 
+# %% Sparsification of the identified model
+sindy_layer.pdf_thresholding(threshold=1.5)
+
 # %% PUBLICATION
+
+# reshape data for further processing
 X_test = x_test_scaled.numpy().reshape(-1, n_timesteps_test, pca_order)
 DXDT_test = dxdt_test_scaled.numpy().reshape(-1, n_timesteps_test, pca_order)
 DXDDT_test = dxddt_test_scaled.numpy().reshape(-1, n_timesteps_test, pca_order)
@@ -335,7 +302,7 @@ t_test = t_test.reshape(-1, n_timesteps_test)
 i_test = 0
 n_traj = 10
 test_ids = [1, 10]
-n_test = len(test_ids)  # X_test.shape[0]
+n_test = len(test_ids)
 
 # error in physical space
 # %%
@@ -424,7 +391,7 @@ uq_ts = []
 uq_ys = []
 uq_means = []
 for i_test in test_ids:
-    logging.info(f"test trajectory {i_test+1}/{n_test}")
+    logging.info(f"identification_layer trajectory {i_test+1}/{n_test}")
     # List to store the solution trajectories in latent space
     sol_list = []
     sol_list_t = []

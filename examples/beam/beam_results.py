@@ -125,7 +125,7 @@ if test == "vindy":
 elif test == "sindy":
     sindy_layer = SindyLayer(**layer_params)
 else:
-    raise ValueError('test must be either "vindy" or "sindy"')
+    raise ValueError('identification_layer must be either "vindy" or "sindy"')
 
 aesindy = VAESindy(
     sindy_layer=sindy_layer,
@@ -380,7 +380,7 @@ kernel_orig, kernel_scale_orig = sindy_layer.kernel, sindy_layer.kernel_scale
 uq_ts = []
 uq_ys = []
 for i_test in range(n_test):
-    logging.info(f"test trajectory {i_test+1}/{n_test}")
+    logging.info(f"identification_layer trajectory {i_test+1}/{n_test}")
     # List to store the solution trajectories in latent space
     sol_list = []
     sol_list_t = []

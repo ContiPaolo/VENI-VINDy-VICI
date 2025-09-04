@@ -90,3 +90,51 @@ def coefficient_distribution_gif(
         images,
         duration=100,
     )
+
+
+def plot_train_history(history, outdir, validation: bool = True):
+    """
+    Plot the training history
+    :param history:
+    :param outdir:
+    :return:
+    """
+    os.makedirs(outdir, exist_ok=True)
+    # plot training history
+    fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+    for loss_term, loss_values in history.items():
+        if (
+            (not validation and "val_" in loss_term)
+            or (validation and "val_" not in loss_term)
+        ) and "coeffs" not in loss_term:
+            ax.plot(loss_values, label=loss_term)
+    ax.set_yscale("log")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.legend()
+    plt.show()
+    fig.savefig(os.path.join(outdir, "training_history.png"))
+    plt.close(fig)
+
+
+def plot_coefficients_train_history(history, outdir):
+    """
+    Plot the coefficient training history
+    :param history:
+    :param outdir:
+    :return:
+    """
+    mean_over_epochs = np.array(history["coeffs_mean"]).squeeze()
+    scale_over_epochs = np.array(history["coeffs_scale"]).squeeze()
+    os.makedirs(outdir, exist_ok=True)
+    # plot training history
+    fig, ax = plt.subplots(2, 1, figsize=(6, 4))
+    ax[0].plot(mean_over_epochs)
+    ax[0].set_xlabel("Epoch")
+    ax[0].set_ylabel("Coefficient mean")
+    ax[1].plot(scale_over_epochs)
+    ax[1].set_xlabel("Epoch")
+    ax[1].set_ylabel("Coefficient scale")
+    plt.show()
+    fig.savefig(os.path.join(outdir, "coefficients_history.png"))
+    plt.close(fig)
