@@ -45,7 +45,7 @@ identification_layer = "vindy"  # 'vindy' or 'sindy'
 reduced_order = 1
 pca_order = 3
 noise = True
-nth_time_step = 8
+nth_time_step = 4
 second_order = True
 
 beta_vindy = 1e-8  # 5e-9
@@ -143,7 +143,7 @@ from morml.reduction import (
     VariationalAutoencoder,
 )
 
-n_sims_train = 2
+n_sims_train = 24
 n_sims_val = n_sims - n_sims_train
 x_train, dxdt_train, dxddt_train, params_train, t_train = [
     x[: n_sims_train * n_timesteps],
@@ -208,14 +208,14 @@ regression_input_test, z_test, _, regression_input_test_list, z_test_list, _ = (
 )
 
 i_sim = 0
-nn = mm.regression.NN(regression_input, z, [32, 32, 32])
-train_hist = nn.train(epochs=100, scaler="minmax", output_scaler="maxabs")
-mse, score = nn.evaluate(regression_input, z)
-logging.info("Train: The regression scored r2_score = %.4f", score)
-mse, score = nn.evaluate(regression_input_test_list[i_sim], z_test_list[i_sim])
-logging.info("Test: The regression scored r2_score = %.4f", score)
-
-method.set_algorithm(nn)
+# nn = mm.regression.NN(regression_input, z, [32, 32, 32])
+# train_hist = nn.train(epochs=100, scaler="minmax", output_scaler="maxabs")
+# mse, score = nn.evaluate(regression_input, z)
+# logging.info("Train: The regression scored r2_score = %.4f", score)
+# mse, score = nn.evaluate(regression_input_test_list[i_sim], z_test_list[i_sim])
+# logging.info("Test: The regression scored r2_score = %.4f", score)
+#
+# method.set_algorithm(nn)
 
 
 gp = mm.regression.GPR(regression_input, z, kernel="matern")
@@ -270,56 +270,35 @@ def predict_single_sample(self, x):
     return y, y_std
 
 
-i_sim = 5
-z_pred, z_std = predict_single_sample(gp, regression_input_test_list[i_sim])
+for i_sim in range(n_sims_test):
+    z_pred, z_std = predict_single_sample(gp, regression_input_test_list[i_sim])
 
-# plot prediction with uncertainty
-fig, ax = plt.subplots(1, 1)
-ax.plot(z_test_list[i_sim][:, 0], "gray", label="True")
-ax.plot(z_pred, "r--", label="Predicted")
-ax.fill_between(
-    np.arange(len(z_pred)),
-    (z_pred - 2 * z_std).squeeze(),
-    (z_pred + 2 * z_std).squeeze(),
-    color="r",
-    alpha=0.3,
-    zorder=3,  # Higher zorder to bring it to the foreground
-)
-ax.legend()
-plt.ylim([-50, 50])
-ax.set_title("Latent variable")
-plt.show()
+    # plot prediction with uncertainty
+    fig, ax = plt.subplots(1, 1)
+    ax.plot(z_test_list[i_sim][:, 0], "gray", label="True")
+    ax.plot(z_pred, "r--", label="Predicted")
+    ax.fill_between(
+        np.arange(len(z_pred)),
+        (z_pred - 2 * z_std).squeeze(),
+        (z_pred + 2 * z_std).squeeze(),
+        color="r",
+        alpha=0.3,
+        zorder=3,  # Higher zorder to bring it to the foreground
+    )
+    ax.legend()
+    plt.ylim([-50, 50])
+    ax.set_title("Latent variable")
+    # save figure
+    plt.savefig(os.path.join(result_dir, f"beam_gp_prediction_simulation_{i_sim}.png"))
 
-# test
-z_pred, z_std = method.regression.regressor.predict(
-    regression_input_test_list[i_sim], return_std=True
-)
-
-# plot prediction with uncertainty
-fig, ax = plt.subplots(1, 1)
-ax.plot(z_pred, "r--", label="Predicted")
-ax.fill_between(
-    np.arange(len(z_pred)),
-    z_pred - 2 * z_std,
-    z_pred + 2 * z_std,
-    color="r",
-    alpha=0.3,
-    zorder=3,  # Higher zorder to bring it to the foreground
-)
-ax.plot(z_test_list[i_sim][:, 0], "gray", label="True")
-ax.legend()
-ax.set_title("Latent variable")
-plt.show()
-
-
-# %% nn
-i_sim = 5
-z_pred = method.regression.predict_single_sample(regression_input_test_list[i_sim])
-
-# plot prediction with uncertainty
-fig, ax = plt.subplots(1, 1)
-ax.plot(z_test_list[i_sim][:, 0], "gray", label="True")
-ax.plot(z_pred, "r--", label="Predicted")
+# # test
+# z_pred, z_std = method.regression.regressor.predict(
+#     regression_input_test_list[i_sim], return_std=True
+# )
+#
+# # plot prediction with uncertainty
+# fig, ax = plt.subplots(1, 1)
+# ax.plot(z_pred, "r--", label="Predicted")
 # ax.fill_between(
 #     np.arange(len(z_pred)),
 #     z_pred - 2 * z_std,
@@ -328,6 +307,7 @@ ax.plot(z_pred, "r--", label="Predicted")
 #     alpha=0.3,
 #     zorder=3,  # Higher zorder to bring it to the foreground
 # )
-ax.legend()
-ax.set_title("Latent variable")
-plt.show()
+# ax.plot(z_test_list[i_sim][:, 0], "gray", label="True")
+# ax.legend()
+# ax.set_title("Latent variable")
+# plt.show()
