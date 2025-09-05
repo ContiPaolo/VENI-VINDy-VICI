@@ -45,7 +45,7 @@ identification_layer = "vindy"  # 'vindy' or 'sindy'
 reduced_order = 1
 pca_order = 3
 noise = True
-nth_time_step = 4
+nth_time_step = 8
 second_order = True
 
 beta_vindy = 1e-8  # 5e-9
@@ -169,6 +169,7 @@ reduction = mm.reduction.Autoencoder(
 )
 
 
+logging.info("Reduction")
 # save weights of the autoencoder
 try:
     reduction.autoencoder.build(input_shape=[x_train.shape])
@@ -217,12 +218,12 @@ i_sim = 0
 #
 # method.set_algorithm(nn)
 
-
+logging.info("Fit regression")
 gp = mm.regression.GPR(regression_input, z, kernel="matern")
 train_hist = gp.train(scaler="minmax", output_scaler="maxabs")
 
-mse, score = gp.evaluate(regression_input, z)
-logging.info("Train: The regression scored r2_score = %.4f", score)
+# mse, score = gp.evaluate(regression_input, z)
+# logging.info("Train: The regression scored r2_score = %.4f", score)
 
 mse, score = gp.evaluate(regression_input_test_list[i_sim], z_test_list[i_sim])
 logging.info("Test: The regression scored r2_score = %.4f", score)
