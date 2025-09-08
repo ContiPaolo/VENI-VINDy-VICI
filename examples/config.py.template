@@ -1,0 +1,4 @@
+beam = dict(
+    ref_coords="YOURPATH/beam_ref_coords.csv",
+    processed_data="YOURPATH/processed_data.npy",
+)
