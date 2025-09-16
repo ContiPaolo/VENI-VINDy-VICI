@@ -230,7 +230,7 @@ def load_beam_data(
         logging.info(f"Manipulating {key}")
         # we don't want to skip time steps for the identification_layer data, and we don't want to trim time
         manipulate_dicts_test[key] = array.reshape(n_test, n_timesteps, array.shape[1])[
-            :, ::1
+            :, ::nth_time_step
         ].reshape(-1, array.shape[1])
 
     # acknowledge for new n_timesteps

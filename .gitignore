@@ -143,3 +143,6 @@ examples/Roessler/Roessler.py
 examples/Roessler/LV.py
 
 examples/config.py
+data
+pdm.lock
+.pdm-python
