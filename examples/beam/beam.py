@@ -34,7 +34,7 @@ import config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 # Constants
-LOAD_MODEL = True
+LOAD_MODEL = False
 BETA_VINDY = 1e-8
 BETA_VAE = 1e-8
 L_REC = 1e-3
@@ -46,6 +46,7 @@ IDENTIFICATION_LAYER = "vindy"  # 'vindy' or 'sindy'
 REDUCED_ORDER = 1
 PCA_ORDER = 3
 NTH_TIME_STEP = 3
+EPOCHS = 100
 SECOND_ORDER = True
 PDF_THRESHOLD = 5
 
@@ -159,7 +160,7 @@ def train_model(veni, x_input, x_input_val, weights_path, log_dir, train_histdir
             validation_data=(x_input_val, None),
             callbacks=callbacks,
             y=None,
-            epochs=2500,
+            epochs=EPOCHS,
             batch_size=int(x_input[0].shape[0] / NTH_TIME_STEP),
             verbose=2,
         )
@@ -238,15 +239,15 @@ def perform_forward_uq(
         logging.info(f"Processing trajectory {i_test+1}/{n_test}")
         sol_list = []
         sol_list_t = []
+        z0, dzdt0 = veni.calc_latent_time_derivatives(
+            X_test[i_test][0:1], DXDT_test[i_test][0:1]
+        )
         for traj in range(n_traj):
             logging.info(f"\tSampling trajectory {traj+1}/{n_traj}")
             sampled_coeff, _, _ = veni.sindy_layer._coeffs
             sampled_coeff = sampled_coeff[1:]
             veni.sindy_layer.kernel = tf.reshape(sampled_coeff, (-1, 1))
 
-            z0, dzdt0 = veni.calc_latent_time_derivatives(
-                X_test[i_test][0:1], DXDT_test[i_test][0:1]
-            )
             sol = veni.integrate(
                 np.concatenate([z0, dzdt0]).squeeze(),
                 t_test[i_test].squeeze(),
@@ -468,7 +469,7 @@ def main():
     training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni)
 
     # Sparsification of the identified model
-    veni.sindy_layer.pdf_thresholding(threshold=PDF_THRESHOLD)
+    # veni.sindy_layer.pdf_thresholding(threshold=PDF_THRESHOLD)
 
     # Inference and forward UQ
     logging.info("Performing inference and forward UQ...")
@@ -499,7 +500,6 @@ def main():
         uq_results["uq_ys_std"],
         switch_data_format(t_test, n_sims, n_timesteps_test),
         uq_results["z_test"],
-        uq_results["dzdt_test"],
         test_ids,
     )
 
