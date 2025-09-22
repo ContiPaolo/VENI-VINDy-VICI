@@ -44,7 +44,6 @@ identification_layer = "vindy"  # 'vindy' or 'sindy'
 # Script parameter
 reduced_order = 1
 pca_order = 3
-noise = True
 nth_time_step = 3
 second_order = True
 
@@ -58,60 +57,28 @@ end_time_step = 14000
 # this scripts path + results
 result_dir = os.path.join(os.path.dirname(__file__), "results")
 
-if noise:
-    # for storage reasons we just load the pca components and not the full noisy data
-    (
-        t,
-        params,
-        x,
-        dxdt,
-        dxddt,
-        t_test,
-        params_test,
-        x_test,
-        dxdt_test,
-        dxddt_test,
-        ref_coords,
-        V,
-        n_sims,
-        n_timesteps,
-    ) = load_beam_data(
-        config.beam["processed_data"],
-        end_time_step=end_time_step,
-        nth_time_step=nth_time_step,
-        pca_order=pca_order,
-    )
-else:
-    (
-        t,
-        params,
-        param_int,
-        f,
-        x,
-        dxdt,
-        dxddt,
-        x_int,
-        dx_int,
-        t_test,
-        params_test,
-        param_int_test,
-        f_test,
-        x_test,
-        dxdt_test,
-        dxddt_test,
-        x_int_test,
-        dx_int_test,
-        V,
-        n_sims,
-        n_timesteps,
-    ) = load_data(
-        data_paths=config.beam_data,
-        train_test_ratio=0.7,
-        nth_time_step=nth_time_step,
-        end_time_step=end_time_step,
-        n_int=0,
-        pca_order=pca_order,
-    )
+# for storage reasons we just load the pca components and not the full noisy data
+(
+    t,
+    params,
+    x,
+    dxdt,
+    dxddt,
+    t_test,
+    params_test,
+    x_test,
+    dxdt_test,
+    dxddt_test,
+    ref_coords,
+    V,
+    n_sims,
+    n_timesteps,
+) = load_beam_data(
+    config.beam["processed_data"],
+    end_time_step=end_time_step,
+    nth_time_step=nth_time_step,
+    pca_order=pca_order,
+)
 
 n_timesteps_test = x_test.shape[0] // n_sims
 n_dof = x.shape[1]
