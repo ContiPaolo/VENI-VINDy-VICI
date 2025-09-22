@@ -3,6 +3,7 @@ BEAM MODEL SCRIPT
 
 This script trains and evaluates a beam model using the VENI framework.
 The model identifies the dynamics of a beam system based on input data.
+The data is assumed to be preprocessed and available in the specified path (as per config.py).
 
 Model:
     dzdt    = z
