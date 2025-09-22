@@ -145,6 +145,7 @@ class VindyLayer(SindyLayer):
         _ = self._visualize_coefficients(
             mean.numpy(), log_scale.numpy(), x_range, z, mu
         )
+        plt.show()
 
     def _visualize_coefficients(
         self,
