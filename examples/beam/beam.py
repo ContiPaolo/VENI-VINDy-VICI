@@ -34,10 +34,10 @@ import config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 # Constants
-LOAD_MODEL = False
-BETA_VINDY = 1e-8
+LOAD_MODEL = True
+BETA_VINDY = 1e-7
 BETA_VAE = 1e-8
-L_REC = 1e-3
+L_REC = 1e-2
 L_DZ = 1e0
 L_DX = 1e-5
 END_TIME_STEP = 14000
@@ -45,8 +45,9 @@ MODEL_NAME = "beam"
 IDENTIFICATION_LAYER = "vindy"  # 'vindy' or 'sindy'
 REDUCED_ORDER = 1
 PCA_ORDER = 3
-NTH_TIME_STEP = 3
-EPOCHS = 100
+NTH_TIME_STEP = 6
+EPOCHS = 10000
+LEARNING_RATE = 2e-3
 SECOND_ORDER = True
 PDF_THRESHOLD = 5
 
@@ -237,26 +238,25 @@ def perform_forward_uq(
     uq_means = []
     for i_test in test_ids:
         logging.info(f"Processing trajectory {i_test+1}/{n_test}")
-        sol_list = []
-        sol_list_t = []
+        z_preds = []
+        t_preds = []
         z0, dzdt0 = veni.calc_latent_time_derivatives(
             X_test[i_test][0:1], DXDT_test[i_test][0:1]
         )
         for traj in range(n_traj):
             logging.info(f"\tSampling trajectory {traj+1}/{n_traj}")
-            sampled_coeff, _, _ = veni.sindy_layer._coeffs
-            sampled_coeff = sampled_coeff[1:]
-            veni.sindy_layer.kernel = tf.reshape(sampled_coeff, (-1, 1))
 
-            sol = veni.integrate(
+            # Sample from the posterior distribution of the coefficients and integrate the model
+            sol, coeffs = veni.sindy_layer.integrate_uq(
                 np.concatenate([z0, dzdt0]).squeeze(),
                 t_test[i_test].squeeze(),
                 mu=PARAMS_test[i_test],
             )
-            sol_list.append(sol.y)
-            sol_list_t.append(sol.t)
-        uq_ts.append(sol_list_t)
-        uq_ys.append(sol_list)
+
+            z_preds.append(sol.y)
+            t_preds.append(sol.t)
+        uq_ts.append(t_preds)
+        uq_ys.append(z_preds)
 
         # Mean simulation
         veni.sindy_layer.kernel, veni.sindy_layer.kernel_scale = (
@@ -339,7 +339,7 @@ def training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni):
     veni.vis_modes(x_train_scaled, 4)
 
     # visualize identified coefficients
-    veni.sindy_layer.visualize_coefficients(x_range=[-0.5, 0.5])
+    veni.sindy_layer.visualize_coefficients(x_range=[-1.5, 1.5])
     plt.show()
 
 
@@ -444,7 +444,7 @@ def main():
 
     # Compile and build model
     veni.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=2e-3),
+        optimizer=tf.keras.optimizers.AdamW(learning_rate=LEARNING_RATE),
         loss="mse",
     )
     veni.build(input_shape=([input.shape for input in x_input], None))
@@ -469,7 +469,7 @@ def main():
     training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni)
 
     # Sparsification of the identified model
-    # veni.sindy_layer.pdf_thresholding(threshold=PDF_THRESHOLD)
+    veni.sindy_layer.pdf_thresholding(threshold=PDF_THRESHOLD)
 
     # Inference and forward UQ
     logging.info("Performing inference and forward UQ...")
@@ -478,6 +478,51 @@ def main():
     n_traj = 10
     test_ids = [1, 10]
 
+    # Inference
+    X_test = switch_data_format(x_test_scaled, n_sims, n_timesteps_test)
+    DXDT_test = switch_data_format(dxdt_test_scaled, n_sims, n_timesteps_test)
+    PARAMS_test = switch_data_format(params_test, n_sims, n_timesteps_test)
+    T_test = switch_data_format(t_test, n_sims, n_timesteps_test)
+
+    # Calculate latent time derivatives
+    z_test, dzdt_test, dzddt_test = veni.calc_latent_time_derivatives(
+        x_test_scaled, dxdt_test_scaled, dxddt_test_scaled
+    )
+    z_test = switch_data_format(z_test, n_sims, n_timesteps_test)
+    dzdt_test = switch_data_format(dzdt_test, n_sims, n_timesteps_test)
+
+    z_preds = []
+    t_preds = []
+    for i_test in test_ids:
+        logging.info(f"Processing trajectory {i_test+1}/{len(test_ids)}")
+        # Sample from the posterior distribution of the coefficients and integrate the model
+        sol = veni.integrate(
+            np.concatenate([z_test[i_test, 0], dzdt_test[i_test, 0]]).squeeze(),
+            T_test[i_test].squeeze(),
+            mu=PARAMS_test[i_test],
+        )
+
+        z_preds.append(sol.y)
+        t_preds.append(sol.t)
+
+    z_preds = np.array(z_preds)
+    t_preds = np.array(t_preds)
+
+    # Plot inference results
+    fig, axs = plt.subplots(len(test_ids), 1, figsize=(12, 12), sharex=True)
+    fig.suptitle(f"Inference of Test Trajectories")
+    for i, i_test in enumerate(test_ids):
+        axs[i].set_title(f"Test Trajectory {i_test + 1}")
+        axs[i].plot(T_test[i_test], z_test[i_test][:, 0], color="blue", label="True")
+        axs[i].plot(
+            t_preds[i], z_preds[i][0], color="red", linestyle="--", label="Predicted"
+        )
+        axs[i].set_xlabel("$t$")
+        axs[i].set_ylabel("$z$")
+        axs[i].legend()
+    plt.show()
+
+    # UQ
     uq_results = perform_forward_uq(
         veni,
         x_test_scaled,
