@@ -343,6 +343,75 @@ def training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni):
     plt.show()
 
 
+def perform_inference(
+    veni,
+    x_test_scaled,
+    dxdt_test_scaled,
+    t_test,
+    params_test,
+    test_ids,
+    n_sims,
+    n_timesteps_test,
+):
+    """
+    Perform inference on test trajectories and plot the results.
+
+    Args:
+        veni: The trained VENI model.
+        x_test_scaled: Scaled test data.
+        dxdt_test_scaled: Scaled test data derivatives.
+        t_test: Test time steps.
+        params_test: Test parameters.
+        test_ids: List of test trajectory indices.
+        n_sims: Number of simulations.
+        n_timesteps_test: Number of timesteps in each test trajectory.
+
+    Returns:
+        Tuple: Predicted trajectories and their corresponding time steps.
+    """
+    # Reshape data into simulation-wise format
+    T_test = switch_data_format(t_test, n_sims, n_timesteps_test)
+    z_test, dzdt_test = veni.calc_latent_time_derivatives(
+        x_test_scaled, dxdt_test_scaled
+    )
+    z_test = switch_data_format(z_test, n_sims, n_timesteps_test)
+    dzdt_test = switch_data_format(dzdt_test, n_sims, n_timesteps_test)
+    Params_test = switch_data_format(params_test, n_sims, n_timesteps_test)
+
+    z_preds = []
+    t_preds = []
+    for i_test in test_ids:
+        logging.info(f"Processing trajectory {i_test+1}/{len(test_ids)}")
+        # Perform integration
+        sol = veni.integrate(
+            np.concatenate([z_test[i_test, 0], dzdt_test[i_test, 0]]).squeeze(),
+            T_test[i_test].squeeze(),
+            mu=Params_test[i_test],
+        )
+        z_preds.append(sol.y)
+        t_preds.append(sol.t)
+
+    # Convert predictions to arrays
+    z_preds = np.array(z_preds)
+    t_preds = np.array(t_preds)
+
+    # Plot inference results
+    fig, axs = plt.subplots(len(test_ids), 1, figsize=(12, 12), sharex=True)
+    fig.suptitle(f"Inference of Test Trajectories")
+    for i, i_test in enumerate(test_ids):
+        axs[i].set_title(f"Test Trajectory {i_test + 1}")
+        axs[i].plot(T_test[i_test], z_test[i_test][:, 0], color="blue", label="True")
+        axs[i].plot(
+            t_preds[i], z_preds[i][0], color="red", linestyle="--", label="Predicted"
+        )
+        axs[i].set_xlabel("$t$")
+        axs[i].set_ylabel("$z$")
+        axs[i].legend()
+    plt.show()
+
+    return z_preds, t_preds
+
+
 def uq_plots(
     uq_ts,
     uq_ys_mean,
@@ -479,48 +548,16 @@ def main():
     test_ids = [1, 10]
 
     # Inference
-    X_test = switch_data_format(x_test_scaled, n_sims, n_timesteps_test)
-    DXDT_test = switch_data_format(dxdt_test_scaled, n_sims, n_timesteps_test)
-    PARAMS_test = switch_data_format(params_test, n_sims, n_timesteps_test)
-    T_test = switch_data_format(t_test, n_sims, n_timesteps_test)
-
-    # Calculate latent time derivatives
-    z_test, dzdt_test, dzddt_test = veni.calc_latent_time_derivatives(
-        x_test_scaled, dxdt_test_scaled, dxddt_test_scaled
+    z_preds, t_preds = perform_inference(
+        veni,
+        x_test_scaled,
+        dxdt_test_scaled,
+        t_test,
+        params_test,
+        test_ids,
+        n_sims,
+        n_timesteps_test,
     )
-    z_test = switch_data_format(z_test, n_sims, n_timesteps_test)
-    dzdt_test = switch_data_format(dzdt_test, n_sims, n_timesteps_test)
-
-    z_preds = []
-    t_preds = []
-    for i_test in test_ids:
-        logging.info(f"Processing trajectory {i_test+1}/{len(test_ids)}")
-        # Sample from the posterior distribution of the coefficients and integrate the model
-        sol = veni.integrate(
-            np.concatenate([z_test[i_test, 0], dzdt_test[i_test, 0]]).squeeze(),
-            T_test[i_test].squeeze(),
-            mu=PARAMS_test[i_test],
-        )
-
-        z_preds.append(sol.y)
-        t_preds.append(sol.t)
-
-    z_preds = np.array(z_preds)
-    t_preds = np.array(t_preds)
-
-    # Plot inference results
-    fig, axs = plt.subplots(len(test_ids), 1, figsize=(12, 12), sharex=True)
-    fig.suptitle(f"Inference of Test Trajectories")
-    for i, i_test in enumerate(test_ids):
-        axs[i].set_title(f"Test Trajectory {i_test + 1}")
-        axs[i].plot(T_test[i_test], z_test[i_test][:, 0], color="blue", label="True")
-        axs[i].plot(
-            t_preds[i], z_preds[i][0], color="red", linestyle="--", label="Predicted"
-        )
-        axs[i].set_xlabel("$t$")
-        axs[i].set_ylabel("$z$")
-        axs[i].legend()
-    plt.show()
 
     # UQ
     uq_results = perform_forward_uq(
