@@ -34,10 +34,10 @@ import config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 # Constants
-LOAD_MODEL = True
-BETA_VINDY = 1e-7
+LOAD_MODEL = False
+BETA_VINDY = 1e-8
 BETA_VAE = 1e-8
-L_REC = 1e-2
+L_REC = 1e-3
 L_DZ = 1e0
 L_DX = 1e-5
 END_TIME_STEP = 14000
@@ -170,6 +170,8 @@ def train_model(veni, x_input, x_input_val, weights_path, log_dir, train_histdir
             train_histdir,
             trainhist.history,
         )
+
+        veni.print(precision=4)
 
         # save model
         veni.load_weights(weights_path)
