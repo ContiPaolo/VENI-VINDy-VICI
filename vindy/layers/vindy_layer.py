@@ -145,6 +145,7 @@ class VindyLayer(SindyLayer):
         _ = self._visualize_coefficients(
             mean.numpy(), log_scale.numpy(), x_range, z, mu
         )
+        plt.show()
 
     def _visualize_coefficients(
         self,
@@ -242,9 +243,10 @@ class VindyLayer(SindyLayer):
             sampled_coeffs,
         )
 
+    @tf.function
     def call_uq(self, inputs, coeffs):
         """
-        Applies the VINDy layer for given coefficients so that the coefficients are not sampled from the distribution
+        Applies the VINDy layer for given coefficients so that not the mean coefficients of the distribution are taken
         :param inputs:
         :param training:
         :return:

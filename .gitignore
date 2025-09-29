@@ -143,6 +143,9 @@ examples/Roessler/Roessler.py
 examples/Roessler/LV.py
 
 examples/config.py
+
+examples/beam/beam 2.py
+
 data
 pdm.lock
 .pdm-python
