@@ -45,8 +45,9 @@ MODEL_NAME = "beam"
 IDENTIFICATION_LAYER = "vindy"  # 'vindy' or 'sindy'
 REDUCED_ORDER = 1
 PCA_ORDER = 3
-NTH_TIME_STEP = 6
-EPOCHS = 10000
+NTH_TIME_STEP = 3
+EPOCHS = 50
+BATCH_SIZE = 256
 LEARNING_RATE = 2e-3
 SECOND_ORDER = True
 PDF_THRESHOLD = 5
@@ -156,15 +157,20 @@ def train_model(veni, x_input, x_input_val, weights_path, log_dir, train_histdir
             SaveCoefficientsCallback(),
         ]
 
+        import time
+
+        start_time = time.time()
         trainhist = veni.fit(
             x=x_input,
             validation_data=(x_input_val, None),
             callbacks=callbacks,
             y=None,
             epochs=EPOCHS,
-            batch_size=int(x_input[0].shape[0] / NTH_TIME_STEP),
+            batch_size=BATCH_SIZE,
             verbose=2,
         )
+        end_time = time.time()
+        logging.info(f"time per epoch: {(end_time - start_time)/EPOCHS:.2f} seconds")
         # Save training history
         np.save(
             train_histdir,
@@ -382,6 +388,7 @@ def perform_inference(
 
     z_preds = []
     t_preds = []
+    start_time = datetime.datetime.now()
     for i_test in test_ids:
         logging.info(f"Processing trajectory {i_test+1}/{len(test_ids)}")
         # Perform integration
@@ -392,6 +399,10 @@ def perform_inference(
         )
         z_preds.append(sol.y)
         t_preds.append(sol.t)
+    end_time = datetime.datetime.now()
+    logging.info(
+        f"Inference time: {(end_time - start_time).total_seconds()/len(test_ids):.2f} seconds per trajectory"
+    )
 
     # Convert predictions to arrays
     z_preds = np.array(z_preds)

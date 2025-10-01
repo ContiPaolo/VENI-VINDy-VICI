@@ -44,6 +44,7 @@ def data_generation(
     model_noise_factor,
     measurement_noise_factor,
     model="roessler",
+    ood=False,
 ):
 
     # Roessler system parameters
@@ -55,9 +56,14 @@ def data_generation(
         b = 0.2
         c = 5.7
         # initial conditions
-        x0 = -5
-        y0 = -5
-        z0 = 0
+        if ood:
+            x0 = -10
+            y0 = -10
+            z0 = 20
+        else:
+            x0 = -5
+            y0 = -5
+            z0 = 0
         ic = [x0, y0, z0]
         dim = 3
         var_names = ["z_1", "z_2", "z_3"]

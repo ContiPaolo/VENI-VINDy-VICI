@@ -143,7 +143,7 @@ class VindyLayer(SindyLayer):
         # get coefficient parameterization
         _, mean, log_scale = self._coeffs
         _ = self._visualize_coefficients(
-            mean.numpy(), log_scale.numpy(), x_range, z, mu
+            mean.numpy(), log_scale.numpy(), x_range=x_range, z=z, mu=mu
         )
         plt.show()
 
