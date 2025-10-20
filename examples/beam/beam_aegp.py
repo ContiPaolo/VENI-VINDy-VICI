@@ -5,9 +5,12 @@ import numpy as np
 import logging
 import datetime
 import time
+import torch
 import tensorflow as tf
 import sys
 import os
+from sklearn import preprocessing
+import gpytorch
 from vindy import VENI
 from vindy.libraries import PolynomialLibrary, ForceLibrary
 from vindy.layers import SindyLayer, VindyLayer
@@ -22,6 +25,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 # Import config
 import config
 import joblib
+from memory_profiler import profile
 
 # tf.config.run_functions_eagerly(True)  # uncomment this line for debugging
 logging.basicConfig()
@@ -46,7 +50,7 @@ identification_layer = "vindy"  # 'vindy' or 'sindy'
 reduced_order = 1
 pca_order = 3
 noise = True
-nth_time_step = 20
+nth_time_step = 3
 second_order = True
 
 beta_vindy = 1e-8  # 5e-9
@@ -54,7 +58,7 @@ beta_vae = 1e-8  # 1e-8
 l_rec = 1e-3  # 1e-3
 l_dz = 1e0  # 1e0
 l_dx = 1e-5  # 1e-5
-end_time_step = 1000
+end_time_step = 14000
 
 # this scripts path + results
 result_dir = os.path.join(os.path.dirname(__file__), "results")
@@ -179,7 +183,7 @@ except:
     train_history = reduction.fit(
         X=x_train,
         epochs=2500,
-        batch_size=int(n_timesteps / nth_time_step),
+        batch_size=256,
         validation_data=x_val,
         verbose=2,
     )
@@ -216,6 +220,186 @@ i_sim = 0
 # logging.info("Test: The regression scored r2_score = %.4f", score)
 # #
 # method.set_algorithm(nn)
+
+# %% GP
+
+
+import torch
+import gpytorch
+from gpytorch.models import ApproximateGP
+from gpytorch.variational import VariationalStrategy, CholeskyVariationalDistribution
+from gpytorch.likelihoods import GaussianLikelihood
+from gpytorch.mlls import VariationalELBO
+
+
+# Define the scalable GP model
+class ScalableGP(ApproximateGP):
+    def __init__(self, inducing_points):
+        variational_distribution = CholeskyVariationalDistribution(
+            inducing_points.size(0)
+        )
+        variational_strategy = VariationalStrategy(
+            self,
+            inducing_points,
+            variational_distribution,
+            learn_inducing_locations=True,
+        )
+        super().__init__(variational_strategy)
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+
+# Training the scalable GP
+def train_scalable_gp(
+    train_x, train_y, inducing_points, num_epochs=100, batch_size=256
+):
+    likelihood = GaussianLikelihood()
+    model = ScalableGP(inducing_points)
+    model.train()
+    likelihood.train()
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    mll = VariationalELBO(likelihood, model, num_data=train_y.size(0))  # Define mll
+
+    # Mini-batch training
+    train_dataset = torch.utils.data.TensorDataset(train_x, train_y)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True
+    )
+
+    start_time = time.time()
+    for epoch in range(num_epochs):
+        for x_batch, y_batch in train_loader:
+            optimizer.zero_grad()
+            output = model(x_batch)
+            loss = -mll(output, y_batch)
+            loss.backward()
+            optimizer.step()
+        epoch_time = time.time() - start_time
+        print(f"Epoch {epoch + 1}/{num_epochs} - Loss: {loss.item():.4f}")
+        print(f"Time per epoch: {epoch_time / (epoch + 1):.3f} s")
+
+    return model, likelihood
+
+
+# Example usage
+
+# train_x = torch.from_numpy(regression_input).float()
+# train_y = torch.from_numpy(z).float().squeeze()
+
+from sklearn.preprocessing import StandardScaler
+
+scaler_x = StandardScaler()
+scaler_y = StandardScaler()
+
+train_x = torch.from_numpy(scaler_x.fit_transform(regression_input)).float()
+train_y = torch.from_numpy(scaler_y.fit_transform(z)).float().squeeze()
+
+# Select inducing points (e.g., randomly select 50 points from training data)
+inducing_points = train_x[::50]
+
+model, likelihood = train_scalable_gp(train_x, train_y, inducing_points)
+
+from gpytorch.models import ExactGP
+from gpytorch.likelihoods import GaussianLikelihood
+from gpytorch.mlls import ExactMarginalLogLikelihood
+
+train_x = torch.from_numpy(regression_input).float()
+train_y = torch.from_numpy(z).float().squeeze()
+
+
+# Define the GP model for state transitions
+class StateTransitionGP(ExactGP):
+
+    @profile
+    def __init__(self, train_x, train_y, likelihood):
+        super(StateTransitionGP, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+
+    @profile
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+    @profile
+    def time_rollout(self, x_init, inputs, time):
+        """
+        Rollout the GP model for a given number of steps starting from initial state x_init and using params
+        :param x_init: Initial state (1D tensor)
+        :param params: Parameters to condition on (1D tensor)
+        :param steps: Number of time steps to rollout
+        :return: Predicted states over the rollout period
+        """
+        self.eval()
+        likelihood.eval()
+
+        predictions = [x_init]
+        current_state = x_init
+
+        for i, _ in enumerate(time):
+            input = torch.cat([current_state, inputs[i]], dim=-1).unsqueeze(0)
+            with torch.no_grad(), gpytorch.settings.fast_pred_var():
+                pred = likelihood(self(input))
+                current_state = pred.mean
+                predictions.append(current_state)
+
+        return torch.stack(predictions).squeeze()
+
+
+# Initialize likelihood and model
+likelihood = GaussianLikelihood()
+model = StateTransitionGP(train_x, train_y, likelihood)
+
+# Train the GP
+model.train()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+mll = ExactMarginalLogLikelihood(likelihood, model)
+
+
+@profile
+def train(n_epochs=100):
+    start_time = time.time()
+    for i in range(n_epochs):
+        # if i % 2 == 0:
+        logging.info(
+            f"Iteration {i + 1}/{n_epochs} - Loss: {mll(model(train_x), train_y).item():.3f}"
+        )
+        optimizer.zero_grad()
+        output = model(train_x)
+        loss = -mll(output, train_y)
+        loss.backward()
+        optimizer.step()
+        end_time = time.time()
+        logging.info(f"Time per iteration: {(end_time - start_time) / (i + 1):.3f} s")
+
+
+train(n_epochs=10)
+
+# Inference in GPSSM
+model.eval()
+likelihood.eval()
+
+z_pred = model.time_rollout(train_x[0:1, 0], train_x[:, -1:], T_train[0])
+
+plt.plot(z_pred.detach().numpy(), "r--", label="Predicted")
+plt.show()
+
+# Predict the next state given a current state
+test_x = torch.rand(1, 2)  # Current state
+with torch.no_grad(), gpytorch.settings.fast_pred_var():
+    prediction = likelihood(model(test_x))
+    mean = prediction.mean
+    lower, upper = prediction.confidence_region()
+
+print(f"Predicted mean: {mean}")
+print(f"Confidence interval: ({lower}, {upper})")
 
 gp_path = os.path.join(result_dir, "gp.pkl")
 try:

@@ -1,6 +1,8 @@
 # Perform all necessary imports
 import tensorflow as tf
 import os
+import matplotlib.pyplot as plt
+import time
 import numpy as np
 import matplotlib
 from vindy import SindyNetwork
@@ -20,14 +22,14 @@ from utils import (
     uq_plot,
 )
 
-matplotlib.use("TkAgg")
+# matplotlib.use("TkAgg")
 
 """
-# ## Roessler System
-# The Roessler system is a system of three ordinary differential equations that describe a simple chaotic system. The equations are given by:
-# $ \dot{z}_1 = -z_2 - z_3 $
-# $ \dot{z}_2 = z_1 + 0.2*z_2 $
-# $ \dot{z}_3 = 0.2 + z_3(z_1-5.7) = 0.2 + z_3 z_1 - 5.7z_3 $
+## Roessler System
+The Roessler system is a system of three ordinary differential equations that describe a simple chaotic system. The equations are given by:
+$ \dot{z}_1 = -z_2 - z_3 $
+$ \dot{z}_2 = z_1 + 0.2*z_2 $
+$ \dot{z}_3 = 0.2 + z_3(z_1-5.7) = 0.2 + z_3 z_1 - 5.7z_3 $
 """
 
 
@@ -56,28 +58,34 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 result_dir = os.path.join(script_dir, "results")
 
 sindy_type = "vindy"  # "sindy" or "vindy"
-model_name = "lorenz"  # lotka_volterra or roessler or lorenz
+model_name = "roessler"  # lotka_volterra or roessler or lorenz
 out_name = "lorenz_high_vindy"
-seed = 69  # random seed
-seed_ = 69
+seed = 29  # random seed
+seed_ = 29
 random_IC = True  # use random initial conditions
 random_a = True  # use random parameters (a in the Roessler system)
 measurement_noise_factor = 0  # 0.01  # measurement noise factor
 model_noise_factor = 0  # 0.1  # model noise factor
 n_train = 100  # number of training trajectories
-n_test = 3  # number of identification_layer trajectories
+n_test = 1  # number of identification_layer trajectories
 include_bias = True  # include bias term in the library
-epochs = 1500  # number of epochs for training
-train = True
+epochs = 200  # number of epochs for training
+train = False
+ood = False
 l_dz = 1
-l_vindy = 1e-2
+l_vindy = 1e-4
 ode = dict(roessler=roessler, lotka_volterra=lotka_volterra, lorenz=lorenz)[model_name]
-learning_rate = 0.0025
+learning_rate = 0.00125
 # Let's define directories for saving the results
 
-# In[34]:
-scenarios = [(0, 0), (0, 0.005), (0, 0.01), (0.005, 0.0), (0.01, 0.0), (0.01, 0.01)]
-# scenarios = [(0, 0), (0, 0.005)]
+"""
+  vindy_nbd_True_me_True_0.1_seed_29_noise_0_traj.csv/(i),
+  vindy_nbd_True_me_True_0.0_seed_29_noise_0.05_traj.csv/(ii),
+  vindy_nbd_True_me_True_0.2_seed_29_noise_0.1_traj.csv/(iii)
+"""
+# scenarios = [(0, 0), (0, 0.005), (0, 0.01), (0.005, 0.0), (0.01, 0.0), (0.01, 0.01)]
+# scenarios = [(0, 0.1), (0.05, 0.0), (0.1, 0.2)]
+scenarios = [(0.1, 0.0)]
 save_data = dict()
 for measurement_noise_factor, model_noise_factor in scenarios:
 
@@ -104,8 +112,22 @@ for measurement_noise_factor, model_noise_factor in scenarios:
         model=model_name,
     )
 
-    # data_plot(t, x, dxdt, x_test)
+    # data_plot(t, x_ood, dxdt_ood, x_test)
+    if ood:
+        (_, _, _, x_test, dxdt_test, _, _) = data_generation(
+            ode,
+            n_train,
+            n_test,
+            random_IC,
+            random_a,
+            seed,
+            model_noise_factor,
+            measurement_noise_factor,
+            model=model_name,
+            ood=True,
+        )
 
+    data_plot(t, x, dxdt, x_test)
     save_data[scenario_info] = dict(x=x, x_test=x_test)
     # ## Model Generation
     #
@@ -182,6 +204,7 @@ for measurement_noise_factor, model_noise_factor in scenarios:
         train_val_id = int(0.7 * x_train.shape[0])
         input_train = [x_train[:train_val_id], dxdt_train[:train_val_id]]
         input_val = [x_train[train_val_id:], dxdt_train[train_val_id:]]
+        start_time = time.time()
         trainhist = model.fit(
             x=input_train,
             validation_data=(input_val, None),
@@ -191,6 +214,8 @@ for measurement_noise_factor, model_noise_factor in scenarios:
             batch_size=256,
             verbose=2,
         )
+        end_time = time.time()
+        print(f"Time per epoch: {(end_time - start_time) / epochs:.2f} seconds")
 
         mean_over_epochs = np.array(trainhist.history["coeffs_mean"]).squeeze()
         scale_over_epochs = np.array(trainhist.history["coeffs_scale"]).squeeze()
@@ -228,26 +253,34 @@ for measurement_noise_factor, model_noise_factor in scenarios:
     # load best weights
     model.load_weights(os.path.join(weights_path))
     # apply pdf threshold
-    sindy_layer.pdf_thresholding(threshold=0.01)
+    sindy_layer.pdf_thresholding(threshold=0.1)
 
     # Let's plot the training history of the VINDy model and check how the coefficients evolved during training.
     # We plot the coefficients of the VINDy model to see which terms are learned by the model.
 
     equation = sindy_layer.model_equation_to_str(z=var_names, precision=3)
+    print(f"Learned Equation: \n\n{equation}")
     save_data[scenario_info]["equation"] = equation
     dxdt_pred = model.sindy(x_test).numpy()
     save_data[scenario_info]["dxdt_pred"] = dxdt_pred
 
     # %% integration
     nt = t.shape[0]
-    i_test = 1
+    i_test = 0  # which trajectory to test
     # integrate the model
     t_0 = i_test * int(nt)
-    sol = sindy_layer.integrate(x_test[t_0 : t_0 + 1].squeeze(), t.squeeze(), mu=None)
+    start_time = time.time()
+    for i in range(5):
+        sol = sindy_layer.integrate(
+            x_test[t_0 : t_0 + 1].squeeze(), t.squeeze(), mu=None
+        )
+    end_time = time.time()
+    print(f"Time per integration: {(end_time - start_time) / 5:.4f} seconds")
     t_pred = sol.t
     x_pred = sol.y
 
-    # trajectory_plot(t, x_test, t_pred, x_pred, dim, nt, i_test, var_names)
+    trajectory_plot(t, x_test, t_pred, x_pred, dim, nt, i_test, var_names)
+    plt.show()
 
     # ## Uncertainty quantification
     # Instead of only using the mean coefficients for a single prediction, we can also sample various models and use them to predict the future states of the Roessler system. This will give us an idea of the uncertainty in the model predictions.
@@ -256,7 +289,6 @@ for measurement_noise_factor, model_noise_factor in scenarios:
     # * We integrate the ODE with the sampled coefficients and collect the trajectories
 
     # In[ ]:
-
     n_traj = 20
     # Store the original coefficients
     kernel_orig, kernel_scale_orig = sindy_layer.kernel, sindy_layer.kernel_scale
@@ -298,9 +330,9 @@ for measurement_noise_factor, model_noise_factor in scenarios:
     save_data[scenario_info]["uq_ys_std"] = x_uq_std
 
     # UQ plot
-    import matplotlib.pyplot as plt
 
     uq_plot(t, x_test, t_preds, x_preds, x_uq_mean_sampled, x_uq_std, dim, nt, i_test)
+    plt.show()
 
     #
     coeffs = np.array([sindy_layer._coeffs[0].numpy() for i in range(10)])
@@ -329,7 +361,7 @@ nth_step = 1
 j = 0
 
 # trajectories
-n_traj = i_test
+n_traj = 1
 n_states = 3
 for key, value in save_data.items():
     t = value["uq_ts"][0, ::nth_step]
@@ -340,22 +372,22 @@ for key, value in save_data.items():
     ub = y_mean + 3 * y_std
     lb = y_mean - 3 * y_std
     # Plot reference and mean predictions for each state and trajectory
-    fig, ax = plt.subplots(n_traj, n_states, figsize=(10, 10))
-    ax = np.atleast_2d(ax)
-    for i in range(n_traj):
-        for j in range(n_states):
-            ax[i, j].plot(t, y_ref[i, j], label="Reference")
-            ax[i, j].plot(t, y_mean[i, j], label="Mean")
-            ax[i, j].fill_between(
-                t,
-                y_mean[i, j] - 3 * y_std[i, j],
-                y_mean[i, j] + 3 * y_std[i, j],
-                alpha=0.3,
-            )
-            ax[i, j].set_xlabel("Time")
-            ax[i, j].set_ylabel(f"Traj {i+1}")
-            ax[i, j].set_title(f"${var_names[i]}_{j+1}$")
-            ax[i, j].legend()
+    # fig, ax = plt.subplots(n_traj, n_states, figsize=(10, 10))
+    # ax = np.atleast_2d(ax)
+    # for i in range(n_traj):
+    #     for j in range(n_states):
+    #         ax[i, j].plot(t, y_ref[i, j], label="Reference")
+    #         ax[i, j].plot(t, y_mean[i, j], label="Mean")
+    #         ax[i, j].fill_between(
+    #             t,
+    #             y_mean[i, j] - 3 * y_std[i, j],
+    #             y_mean[i, j] + 3 * y_std[i, j],
+    #             alpha=0.3,
+    #         )
+    #         ax[i, j].set_xlabel("Time")
+    #         ax[i, j].set_ylabel(f"Traj {i+1}")
+    #         ax[i, j].set_title(f"${var_names[i]}_{j+1}$")
+    #         ax[i, j].legend()
 
     header = ["t"]
     header += [
