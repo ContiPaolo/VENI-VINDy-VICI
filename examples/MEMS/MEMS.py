@@ -1,8 +1,8 @@
 """
 BEAM MODEL SCRIPT
 
-This script trains and evaluates a beam model using the VENI framework.
-The model identifies the dynamics of a beam system based on input data.
+This script trains and evaluates a MEMS model using the VENI framework.
+The model identifies the dynamics of a MEMS system based on input data.
 The data is assumed to be preprocessed and available in the specified path (as per config.py).
 
 Model:
@@ -42,7 +42,7 @@ L_REC = 1e-3  # reconstruction loss weight
 L_DZ = 1e0  # latent derivative loss weight
 L_DX = 1e-5  # physical derivative loss weight
 END_TIME_STEP = 14000  # until which time step the data is used for training
-MODEL_NAME = "beam"
+MODEL_NAME = "MEMS"
 IDENTIFICATION_LAYER = "vindy"  # 'vindy' or 'sindy'
 REDUCED_ORDER = 1  # latent space dimension
 PCA_ORDER = 3  # PCA order for data preprocessing
@@ -69,13 +69,13 @@ def set_seed(seed):
 
 def load_data():
     """
-    Load and preprocess the beam data.
+    Load and preprocess the MEMS data.
 
     Returns:
         Tuple containing training and test data, PCA components, and other
         parameters.
     """
-    logging.info("Loading beam data...")
+    logging.info("Loading MEMS data...")
     return load_beam_data(
         config.beam["data"],
         end_time_step=END_TIME_STEP,
@@ -578,6 +578,7 @@ def main():
     n_traj = 10
     test_ids = [1, 10]
 
+    # VICI
     # Inference
     z_preds, t_preds = perform_inference(
         veni,

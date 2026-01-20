@@ -39,7 +39,7 @@ def preprocess_data(noise_level=0.02, reduced_order=32, plots=False):
         pca_order=4,
     )
     """
-    Preprocess the beam data by adding noise, performing PCA, and saving the processed data.
+    Preprocess the MEMS data by adding noise, performing PCA, and saving the processed data.
 
     Args:
         n_samples (int): Number of samples to preprocess. If -1, preprocess all samples.
@@ -170,7 +170,7 @@ def load_beam_data(
     pca_order=64,
 ):
     """
-    Load and preprocess the beam data from the specified file.
+    Load and preprocess the MEMS data from the specified file.
 
     Args:
         data_paths (str): Path to the data file.

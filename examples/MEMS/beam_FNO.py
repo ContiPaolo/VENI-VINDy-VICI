@@ -59,7 +59,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 # Import config
 import config
 
-model_name = "beam"
+model_name = "MEMS"
 identification_layer = "vindy"  # 'vindy' or 'sindy'
 # Script parameter
 reduced_order = 1

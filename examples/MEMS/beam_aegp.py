@@ -44,7 +44,7 @@ logging.info(
 
 # %% script parameters
 # Load config
-model_name = "beam"
+model_name = "MEMS"
 identification_layer = "vindy"  # 'vindy' or 'sindy'
 # Script parameter
 reduced_order = 1

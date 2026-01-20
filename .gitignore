@@ -144,7 +144,7 @@ examples/Roessler/LV.py
 
 examples/config.py
 
-examples/beam/beam 2.py
+examples/MEMS/beam 2.py
 
 data
 pdm.lock
