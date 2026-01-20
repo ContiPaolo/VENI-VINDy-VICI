@@ -81,7 +81,7 @@ if noise:
         n_sims,
         n_timesteps,
     ) = load_beam_data(
-        config.beam["processed_data"],
+        config.beam["data"],
         end_time_step=end_time_step,
         nth_time_step=nth_time_step,
         pca_order=pca_order,

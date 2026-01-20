@@ -77,7 +77,7 @@ def load_data():
     """
     logging.info("Loading beam data...")
     return load_beam_data(
-        config.beam["processed_data"],
+        config.beam["data"],
         end_time_step=END_TIME_STEP,
         nth_time_step=NTH_TIME_STEP,
         pca_order=PCA_ORDER,

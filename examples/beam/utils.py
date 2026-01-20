@@ -1,9 +1,13 @@
 import logging
+import sys
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from vindy.utils import *
 import pickle
 
+# Add the examples folder to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import config
 
 logging.info(
     "################################   1. Loading    ################################"
@@ -11,42 +15,41 @@ logging.info(
 
 
 # %% script parameters
-def preprocess_data(n_samples=-1, noise_level=0.02, reduced_order=32, plots=False):
+def preprocess_data(noise_level=0.02, reduced_order=32, plots=False):
 
-    use_pca = False
+    # Load data
     (
         t,
         params,
-        param_int,
-        f,
         x,
         dxdt,
         dxddt,
-        x_int,
-        dx_int,
         t_test,
         params_test,
-        param_int_test,
-        f_test,
         x_test,
         dxdt_test,
         dxddt_test,
-        x_int_test,
-        dx_int_test,
+        ref_coords,
         V,
         n_sims,
         n_timesteps,
-    ) = load_data(
-        data_paths=config.beam_data,
-        train_test_ratio=0.7,
+    ) = load_beam_data(
+        config.beam["data"],
         nth_time_step=1,
-        end_time_step=-1,
-        n_int=0,
+        pca_order=4,
     )
-    # reference coordinates
-    ref_coords_path = config.beam["ref_coords"]
-    # load reference coordinates csv file
-    ref_coords = np.loadtxt(ref_coords_path)
+    """
+    Preprocess the beam data by adding noise, performing PCA, and saving the processed data.
+
+    Args:
+        n_samples (int): Number of samples to preprocess. If -1, preprocess all samples.
+        noise_level (float): Noise level to add to the data (as a percentage of mean displacement).
+        reduced_order (int): Number of principal components to retain during PCA.
+        plots (bool): Whether to generate and display plots for debugging.
+
+    Returns:
+        None
+    """
 
     # scale params so that the coefficients grow
     params[:, 2] = 1e-1 * params[:, 2]
@@ -58,14 +61,12 @@ def preprocess_data(n_samples=-1, noise_level=0.02, reduced_order=32, plots=Fals
     ref_coords2 = ref_coords.reshape(-1)[~zero_rows].reshape(-1, 3)
     V = V[~zero_rows]
 
-    # for debugging purposes only use first 10000 samples
-    x = x[: 2 * n_timesteps]
-    dxdt = dxdt[: 2 * n_timesteps]
-    dxddt = dxddt[: 2 * n_timesteps]
-    params = params[: 2 * n_timesteps]
-    t = t[: 2 * n_timesteps]
-
+    # # for debugging purposes only use first two simulations
     # x = x[: 2 * n_timesteps]
+    # dxdt = dxdt[: 2 * n_timesteps]
+    # dxddt = dxddt[: 2 * n_timesteps]
+    # params = params[: 2 * n_timesteps]
+    # t = t[: 2 * n_timesteps]
 
     n_train = int(x.shape[0] / n_timesteps)
     shape = (n_train, n_timesteps, ref_coords2.shape[0], ref_coords2.shape[1])
@@ -79,7 +80,7 @@ def preprocess_data(n_samples=-1, noise_level=0.02, reduced_order=32, plots=Fals
 
     # calculate absolute displacement of each node
     disp_glob = np.linalg.norm(X, axis=3)
-    # 20 percent of the mean displacement as noise
+    # noise_level percent of the mean displacement as noise
     noise = np.random.normal(loc=0, scale=noise_level * disp_glob.mean(), size=X.shape)
     # add noise to the state
     X_ = X + noise
@@ -120,14 +121,12 @@ def preprocess_data(n_samples=-1, noise_level=0.02, reduced_order=32, plots=Fals
         noise=noise,
         params=params,
         params_test=params_test,
-        f=f,
-        f_test=f_test,
         t=t,
         t_test=t_test,
         n_sims=n_sims,
         n_timesteps=n_timesteps,
     )
-    with open(os.path.join(dir, "processed_data.npy"), "wb") as out_file:
+    with open(os.path.join(dir, "data.npy"), "wb") as out_file:
         pickle.dump(save_data, out_file, pickle.HIGHEST_PROTOCOL)
 
     if plots:
@@ -163,24 +162,35 @@ def preprocess_data(n_samples=-1, noise_level=0.02, reduced_order=32, plots=Fals
 
         plt.semilogy(pca.singular_values_)
 
-        # 3d plot of the beam
-        # visualizer = Visualizer()
-        # # disps = add_lognormal_noise(disps, 0.2)
-        # visualizer.animate(
-        #     20 * X_.reshape((-1, ref_coords2.shape[0], ref_coords2.shape[1])) + ref_coords2,
-        #     range(10000),
-        #     color="magenta",
-        #     point_size=3,
-        # )
-
 
 def load_beam_data(
     data_paths,
     nth_time_step=1,
     end_time_step=None,
-    n_int=0,
     pca_order=64,
 ):
+    """
+    Load and preprocess the beam data from the specified file.
+
+    Args:
+        data_paths (str): Path to the data file.
+        nth_time_step (int): Step size for time subsampling.
+        end_time_step (int, optional): Last time step to include. If None, include all.
+        pca_order (int): Number of principal components to retain.
+
+    Returns:
+        tuple: Processed data including time, parameters, states, derivatives, and PCA components.
+    """
+
+    # check if data path is valid
+    # todo: put correct Zenodo link here
+    if not os.path.isfile(data_paths):
+        raise FileNotFoundError(
+            f"Data file {data_paths} not found. "
+            f"Please download the file from Zenodo and "
+            f"specify the correct path in the examples/config.py file."
+        )
+
     with open(data_paths, "rb") as f:
         data = pickle.load(f)
         V = data["V"]
@@ -203,7 +213,7 @@ def load_beam_data(
     if end_time_step is None:
         end_time_step = n_timesteps
 
-    n_test = int(n_sims / 2)
+    n_test = int(x_test.shape[0] / n_timesteps)
     n_sims = n_sims - n_test
     manipulate_dicts = dict(
         time=time,
@@ -236,37 +246,6 @@ def load_beam_data(
     # acknowledge for new n_timesteps
     n_timesteps = int((end_time_step + 1) // nth_time_step)
 
-    # x_successors = []
-    # if n_int > 0:
-    #     x_int = np.zeros([x.shape[0], x.shape[1] - n_int, n_int, x.shape[2]])
-    #     for i_sample in range(0, x.shape[1] - n_int):
-    #         x_int[:, i_sample] = x[:, i_sample : i_sample + n_int]
-    #     dx_int = np.zeros([x.shape[0], x.shape[1] - n_int, n_int, x.shape[2]])
-    #     for i_sample in range(0, dx_dt.shape[1] - n_int):
-    #         dx_int[:, i_sample] = dx_dt[:, i_sample : i_sample + n_int]
-    #     param_int = np.zeros(
-    #         [param.shape[0], param.shape[1] - n_int, n_int, param.shape[2]]
-    #     )
-    #     for i_sample in range(0, dx_dt.shape[1] - n_int):
-    #         param_int[:, i_sample] = param[:, i_sample : i_sample + n_int]
-    #     # remove n_int samples from all data
-    #     x = x[:, :-n_int]
-    #     dx_dt = dx_dt[:, :-n_int]
-    #     dx_ddt = dx_ddt[:, :-n_int]
-    #     time = time[:, :-n_int]
-    #     param = param[:, :-n_int]
-    # else:
-    #     x_int = None
-    #
-    # if n_int > 0:
-    #     x_int_train = np.concatenate(x_int, axis=0)
-    #     dx_int_train = np.concatenate(x_int, axis=0)
-    #     param_int_train = np.concatenate(param_int, axis=0)
-    # else:
-    # x_int_train, x_int_test = None, None
-    # dx_int_train, dx_int_test = None, None
-    # param_int_train, param_int_test = None, None
-
     return (
         manipulate_dicts["time"],
         manipulate_dicts["param"],
@@ -286,4 +265,4 @@ def load_beam_data(
 
 
 if __name__ == "__main__":
-    preprocess_data(n_samples=-0, noise_level=0.01, reduced_order=32)
+    preprocess_data(noise_level=0.01, reduced_order=32)
