@@ -13,6 +13,7 @@ Model:
 
 import os
 import sys
+import random
 import logging
 import numpy as np
 import tensorflow as tf
@@ -35,22 +36,35 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 # Constants
 LOAD_MODEL = False
-BETA_VINDY = 1e-8
-BETA_VAE = 1e-8
-L_REC = 1e-3
-L_DZ = 1e0
-L_DX = 1e-5
-END_TIME_STEP = 14000
+BETA_VINDY = 1e-8  # VINDy prior weight
+BETA_VAE = 1e-8  # VAE KL loss weight
+L_REC = 1e-3  # reconstruction loss weight
+L_DZ = 1e0  # latent derivative loss weight
+L_DX = 1e-5  # physical derivative loss weight
+END_TIME_STEP = 14000  # until which time step the data is used for training
 MODEL_NAME = "beam"
 IDENTIFICATION_LAYER = "vindy"  # 'vindy' or 'sindy'
-REDUCED_ORDER = 1
-PCA_ORDER = 3
-NTH_TIME_STEP = 3
-EPOCHS = 50
-BATCH_SIZE = 256
-LEARNING_RATE = 2e-3
-SECOND_ORDER = True
-PDF_THRESHOLD = 5
+REDUCED_ORDER = 1  # latent space dimension
+PCA_ORDER = 3  # PCA order for data preprocessing
+NTH_TIME_STEP = 3  # use every nth time step for training
+EPOCHS = 500  # number of training epochs
+BATCH_SIZE = 256  # training batch size
+LEARNING_RATE = 2e-3  # learning rate
+SECOND_ORDER = True  # use second order dynamics
+PDF_THRESHOLD = 5  # PDF threshold for coefficient sparsification
+SEED = 42  # random seed for reproducibility
+
+
+def set_seed(seed):
+    """
+    Set seed for reproducibility in TensorFlow, NumPy, and Python's random module.
+
+    Args:
+        seed (int): The seed value to set.
+    """
+    tf.random.set_seed(seed)  # Set TensorFlow seed
+    np.random.seed(seed)  # Set NumPy seed
+    random.seed(seed)  # Set Python random seed
 
 
 def load_data():
@@ -473,6 +487,10 @@ def main():
     """
     Main function to load data, create the model, train, and evaluate.
     """
+
+    # Set seed for reproducibility
+    set_seed(SEED)
+
     # Load data
     (
         t,

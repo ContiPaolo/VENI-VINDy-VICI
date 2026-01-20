@@ -303,7 +303,7 @@ train_y = torch.from_numpy(scaler_y.fit_transform(z)).float().squeeze()
 # Select inducing points (e.g., randomly select 50 points from training data)
 inducing_points = train_x[::50]
 
-model, likelihood = train_scalable_gp(train_x, train_y, inducing_points)
+model, likelihood = train_scalable_gp(train_x, train_y, inducing_points, num_epochs=10)
 
 from gpytorch.models import ExactGP
 from gpytorch.likelihoods import GaussianLikelihood
@@ -311,6 +311,27 @@ from gpytorch.mlls import ExactMarginalLogLikelihood
 
 train_x = torch.from_numpy(regression_input).float()
 train_y = torch.from_numpy(z).float().squeeze()
+
+model.eval()
+likelihood.eval()
+x_init = train_x[0:1, 0]
+inputs = train_x[:, -1:]
+# z_pred = model.time_rollout(train_x[0:1, 0], train_x[:, -1:], T_train[0])
+
+predictions = [x_init]
+current_state = x_init
+
+start_time = time.time()
+for i, _ in enumerate(T_train[0]):
+    input = torch.cat([current_state, inputs[i]], dim=-1).unsqueeze(0)
+    with torch.no_grad(), gpytorch.settings.fast_pred_var():
+        pred = likelihood(model(input))
+        current_state = pred.mean
+        predictions.append(current_state)
+predictions = torch.stack(predictions).squeeze()
+reduction.reconstruct(predictions)
+end_time = time.time()
+print(f"Time for rollout: {(end_time - start_time)*1.6:.3f} s")
 
 
 # Define the GP model for state transitions
