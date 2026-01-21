@@ -1,8 +1,8 @@
 """
 BEAM MODEL SCRIPT
 
-This script trains and evaluates a beam model using the VENI framework.
-The model identifies the dynamics of a beam system based on input data.
+This script trains and evaluates a MEMS model using the VENI framework.
+The model identifies the dynamics of a MEMS system based on input data.
 The data is assumed to be preprocessed and available in the specified path (as per config.py).
 
 Model:
@@ -13,6 +13,7 @@ Model:
 
 import os
 import sys
+import random
 import logging
 import numpy as np
 import tensorflow as tf
@@ -35,38 +36,125 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 # Constants
 LOAD_MODEL = False
-BETA_VINDY = 1e-8
-BETA_VAE = 1e-8
-L_REC = 1e-3
-L_DZ = 1e0
-L_DX = 1e-5
-END_TIME_STEP = 14000
-MODEL_NAME = "beam"
+BETA_VINDY = 1e-8  # VINDy prior weight
+BETA_VAE = 1e-8  # VAE KL loss weight
+L_REC = 1e-3  # reconstruction loss weight
+L_DZ = 1e0  # latent derivative loss weight
+L_DX = 1e-5  # physical derivative loss weight
+END_TIME_STEP = 14000  # until which time step the data is used for training
+MODEL_NAME = "MEMS"
 IDENTIFICATION_LAYER = "vindy"  # 'vindy' or 'sindy'
-REDUCED_ORDER = 1
-PCA_ORDER = 3
-NTH_TIME_STEP = 6
-EPOCHS = 10000
-LEARNING_RATE = 2e-3
-SECOND_ORDER = True
-PDF_THRESHOLD = 5
+REDUCED_ORDER = 1  # latent space dimension
+PCA_ORDER = 3  # PCA order for data preprocessing
+NTH_TIME_STEP = 3  # use every nth time step for training
+EPOCHS = 500  # number of training epochs
+BATCH_SIZE = 256  # training batch size
+LEARNING_RATE = 2e-3  # learning rate
+SECOND_ORDER = True  # use second order dynamics
+PDF_THRESHOLD = 5  # PDF threshold for coefficient sparsification
+SEED = 42  # random seed for reproducibility
+
+
+def set_seed(seed):
+    """
+    Set seed for reproducibility in TensorFlow, NumPy, and Python's random module.
+
+    Args:
+        seed (int): The seed value to set.
+    """
+    tf.random.set_seed(seed)  # Set TensorFlow seed
+    np.random.seed(seed)  # Set NumPy seed
+    random.seed(seed)  # Set Python random seed
 
 
 def load_data():
     """
-    Load and preprocess the beam data.
+    Load and preprocess the MEMS data.
 
     Returns:
         Tuple containing training and test data, PCA components, and other
         parameters.
     """
-    logging.info("Loading beam data...")
+    logging.info("Loading MEMS data...")
     return load_beam_data(
-        config.beam["processed_data"],
+        config.beam["data"],
         end_time_step=END_TIME_STEP,
         nth_time_step=NTH_TIME_STEP,
         pca_order=PCA_ORDER,
     )
+
+
+def visualize_sample_data(t, x, dxdt, params, n_timesteps):
+    """
+    Visualize a sample of the training data.
+
+    Args:
+        t (np.ndarray): Time steps.
+        x (np.ndarray): State data.
+        dxdt (np.ndarray): State derivatives.
+        params (np.ndarray): Parameters.
+        n_timesteps (int): Number of time steps per simulation.
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig.suptitle("MEMS Beam Training Data Sample", fontsize=14, fontweight="bold")
+
+    # Select first simulation for visualization
+    sim_length = n_timesteps
+    sample_time = t[:sim_length]
+    sample_x = x[:sim_length, 0]  # First PCA component
+    sample_dxdt = dxdt[:sim_length, 0]
+    sample_params = params[:sim_length] if params.shape[1] > 0 else None
+
+    # Position vs time
+    axes[0, 0].plot(sample_time, sample_x, "b-", linewidth=1.5)
+    axes[0, 0].set_title("Beam Position (1st PCA mode)")
+    axes[0, 0].set_xlabel("Time [s]")
+    axes[0, 0].set_ylabel("Position")
+    axes[0, 0].grid(True, alpha=0.3)
+
+    # Velocity vs time
+    axes[0, 1].plot(sample_time, sample_dxdt, "r-", linewidth=1.5)
+    axes[0, 1].set_title("Beam Velocity")
+    axes[0, 1].set_xlabel("Time [s]")
+    axes[0, 1].set_ylabel("Velocity")
+    axes[0, 1].grid(True, alpha=0.3)
+
+    # Phase portrait
+    axes[1, 0].plot(sample_x, sample_dxdt, "g-", linewidth=1, alpha=0.7)
+    axes[1, 0].scatter(
+        sample_x[0], sample_dxdt[0], color="green", s=50, label="Start", zorder=5
+    )
+    axes[1, 0].scatter(
+        sample_x[-1], sample_dxdt[-1], color="red", s=50, label="End", zorder=5
+    )
+    axes[1, 0].set_title("Phase Portrait")
+    axes[1, 0].set_xlabel("Position")
+    axes[1, 0].set_ylabel("Velocity")
+    axes[1, 0].legend()
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # forcing function is u(t) = F*cos(omega*t)
+    forcing = ForceLibrary(functions=[tf.cos])(sample_params)
+    # Parameter forcing (if available)
+    if sample_params is not None:
+        axes[1, 1].plot(sample_time, forcing, "m-", linewidth=1.5)
+        axes[1, 1].set_title("External Forcing")
+        axes[1, 1].set_xlabel("Time [s]")
+        axes[1, 1].set_ylabel("Force Parameter")
+        axes[1, 1].grid(True, alpha=0.3)
+    else:
+        axes[1, 1].text(
+            0.5,
+            0.5,
+            "No parameter data\navailable",
+            transform=axes[1, 1].transAxes,
+            ha="center",
+            va="center",
+        )
+        axes[1, 1].set_title("External Forcing")
+
+    plt.tight_layout()
+    plt.show()
 
 
 def create_model(x, params, dt, n_dof):
@@ -156,15 +244,20 @@ def train_model(veni, x_input, x_input_val, weights_path, log_dir, train_histdir
             SaveCoefficientsCallback(),
         ]
 
+        import time
+
+        start_time = time.time()
         trainhist = veni.fit(
             x=x_input,
             validation_data=(x_input_val, None),
             callbacks=callbacks,
             y=None,
             epochs=EPOCHS,
-            batch_size=int(x_input[0].shape[0] / NTH_TIME_STEP),
+            batch_size=BATCH_SIZE,
             verbose=2,
         )
+        end_time = time.time()
+        logging.info(f"time per epoch: {(end_time - start_time)/EPOCHS:.2f} seconds")
         # Save training history
         np.save(
             train_histdir,
@@ -382,8 +475,9 @@ def perform_inference(
 
     z_preds = []
     t_preds = []
-    for i_test in test_ids:
-        logging.info(f"Processing trajectory {i_test+1}/{len(test_ids)}")
+    start_time = datetime.datetime.now()
+    for i, i_test in enumerate(test_ids):
+        logging.info(f"Processing trajectory {i+1}/{len(test_ids)}")
         # Perform integration
         sol = veni.integrate(
             np.concatenate([z_test[i_test, 0], dzdt_test[i_test, 0]]).squeeze(),
@@ -392,6 +486,10 @@ def perform_inference(
         )
         z_preds.append(sol.y)
         t_preds.append(sol.t)
+    end_time = datetime.datetime.now()
+    logging.info(
+        f"Inference time: {(end_time - start_time).total_seconds()/len(test_ids):.2f} seconds per trajectory"
+    )
 
     # Convert predictions to arrays
     z_preds = np.array(z_preds)
@@ -462,6 +560,10 @@ def main():
     """
     Main function to load data, create the model, train, and evaluate.
     """
+
+    # Set seed for reproducibility
+    set_seed(SEED)
+
     # Load data
     (
         t,
@@ -483,6 +585,9 @@ def main():
     n_timesteps_test = x_test.shape[0] // n_sims
     n_dof = x.shape[1]
     dt = t[1] - t[0]
+
+    # Visualize sample training data
+    visualize_sample_data(t, x, dxdt, params, n_timesteps)
 
     # Create model
     veni = create_model(x, params, dt, n_dof)
@@ -549,6 +654,7 @@ def main():
     n_traj = 10
     test_ids = [1, 10]
 
+    # VICI
     # Inference
     z_preds, t_preds = perform_inference(
         veni,
