@@ -187,7 +187,7 @@ def load_beam_data(
     if not os.path.isfile(data_paths):
         raise FileNotFoundError(
             f"Data file {data_paths} not found. "
-            f"Please download the file from Zenodo and "
+            f"Please download the file from Zenodo (http://doi.org/10.5281/zenodo.18313843) and "
             f"specify the correct path in the examples/config.py file."
         )
 
