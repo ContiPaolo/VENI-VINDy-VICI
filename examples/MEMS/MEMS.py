@@ -84,6 +84,79 @@ def load_data():
     )
 
 
+def visualize_sample_data(t, x, dxdt, params, n_timesteps):
+    """
+    Visualize a sample of the training data.
+
+    Args:
+        t (np.ndarray): Time steps.
+        x (np.ndarray): State data.
+        dxdt (np.ndarray): State derivatives.
+        params (np.ndarray): Parameters.
+        n_timesteps (int): Number of time steps per simulation.
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig.suptitle("MEMS Beam Training Data Sample", fontsize=14, fontweight="bold")
+
+    # Select first simulation for visualization
+    sim_length = n_timesteps
+    sample_time = t[:sim_length]
+    sample_x = x[:sim_length, 0]  # First PCA component
+    sample_dxdt = dxdt[:sim_length, 0]
+    sample_params = params[:sim_length] if params.shape[1] > 0 else None
+
+    # Position vs time
+    axes[0, 0].plot(sample_time, sample_x, "b-", linewidth=1.5)
+    axes[0, 0].set_title("Beam Position (1st PCA mode)")
+    axes[0, 0].set_xlabel("Time [s]")
+    axes[0, 0].set_ylabel("Position")
+    axes[0, 0].grid(True, alpha=0.3)
+
+    # Velocity vs time
+    axes[0, 1].plot(sample_time, sample_dxdt, "r-", linewidth=1.5)
+    axes[0, 1].set_title("Beam Velocity")
+    axes[0, 1].set_xlabel("Time [s]")
+    axes[0, 1].set_ylabel("Velocity")
+    axes[0, 1].grid(True, alpha=0.3)
+
+    # Phase portrait
+    axes[1, 0].plot(sample_x, sample_dxdt, "g-", linewidth=1, alpha=0.7)
+    axes[1, 0].scatter(
+        sample_x[0], sample_dxdt[0], color="green", s=50, label="Start", zorder=5
+    )
+    axes[1, 0].scatter(
+        sample_x[-1], sample_dxdt[-1], color="red", s=50, label="End", zorder=5
+    )
+    axes[1, 0].set_title("Phase Portrait")
+    axes[1, 0].set_xlabel("Position")
+    axes[1, 0].set_ylabel("Velocity")
+    axes[1, 0].legend()
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # forcing function is u(t) = F*cos(omega*t)
+    forcing = ForceLibrary(functions=[tf.cos])(sample_params)
+    # Parameter forcing (if available)
+    if sample_params is not None:
+        axes[1, 1].plot(sample_time, forcing, "m-", linewidth=1.5)
+        axes[1, 1].set_title("External Forcing")
+        axes[1, 1].set_xlabel("Time [s]")
+        axes[1, 1].set_ylabel("Force Parameter")
+        axes[1, 1].grid(True, alpha=0.3)
+    else:
+        axes[1, 1].text(
+            0.5,
+            0.5,
+            "No parameter data\navailable",
+            transform=axes[1, 1].transAxes,
+            ha="center",
+            va="center",
+        )
+        axes[1, 1].set_title("External Forcing")
+
+    plt.tight_layout()
+    plt.show()
+
+
 def create_model(x, params, dt, n_dof):
     """
     Create the VENI model.
@@ -512,6 +585,9 @@ def main():
     n_timesteps_test = x_test.shape[0] // n_sims
     n_dof = x.shape[1]
     dt = t[1] - t[0]
+
+    # Visualize sample training data
+    visualize_sample_data(t, x, dxdt, params, n_timesteps)
 
     # Create model
     veni = create_model(x, params, dt, n_dof)
