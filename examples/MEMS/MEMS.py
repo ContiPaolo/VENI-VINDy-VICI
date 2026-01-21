@@ -476,8 +476,8 @@ def perform_inference(
     z_preds = []
     t_preds = []
     start_time = datetime.datetime.now()
-    for i_test in test_ids:
-        logging.info(f"Processing trajectory {i_test+1}/{len(test_ids)}")
+    for i, i_test in enumerate(test_ids):
+        logging.info(f"Processing trajectory {i+1}/{len(test_ids)}")
         # Perform integration
         sol = veni.integrate(
             np.concatenate([z_test[i_test, 0], dzdt_test[i_test, 0]]).squeeze(),
