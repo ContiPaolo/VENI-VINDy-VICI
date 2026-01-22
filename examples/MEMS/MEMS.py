@@ -77,7 +77,7 @@ def load_data():
     """
     logging.info("Loading MEMS data...")
     return load_beam_data(
-        config.beam["data"],
+        config.beam,
         end_time_step=END_TIME_STEP,
         nth_time_step=NTH_TIME_STEP,
         pca_order=PCA_ORDER,
