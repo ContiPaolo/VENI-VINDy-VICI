@@ -1,1 +1,1 @@
-from .networks import AutoencoderSindy, VENI, SindyNetwork
+from .networks import AutoencoderSindy, VENI, IdentificationNetwork

@@ -2,36 +2,8 @@ import os
 import scipy
 import numpy as np
 import datetime
-import time
 import matplotlib.pyplot as plt
 from vindy.utils import add_lognormal_noise
-from sklearn.utils import extmath
-
-
-def compute_randomized_SVD(S, N_POD, N_h, n_channels, name="", verbose=False):
-    if verbose:
-        print("Computing randomized POD...")
-    U = np.zeros((n_channels * N_h, N_POD))
-    start_time = time.time()
-    for i in range(n_channels):
-        U[i * N_h : (i + 1) * N_h], Sigma, Vh = extmath.randomized_svd(
-            S[i * N_h : (i + 1) * N_h, :],
-            n_components=N_POD,
-            transpose=False,
-            flip_sign=False,
-            random_state=123,
-        )
-        if verbose:
-            print("Done... Took: {0} seconds".format(time.time() - start_time))
-
-    if verbose:
-        I = 1.0 - np.cumsum(np.square(Sigma)) / np.sum(np.square(Sigma))
-        print(I[-1])
-
-    # if name:
-    #     sio.savemat(name, {"V": U[:, :N_POD]})
-
-    return U, Sigma, Vh
 
 
 def data_generation(
@@ -44,7 +16,6 @@ def data_generation(
     model_noise_factor,
     measurement_noise_factor,
     model="roessler",
-    ood=False,
 ):
 
     # Roessler system parameters
@@ -56,14 +27,9 @@ def data_generation(
         b = 0.2
         c = 5.7
         # initial conditions
-        if ood:
-            x0 = -10
-            y0 = -10
-            z0 = 20
-        else:
-            x0 = -5
-            y0 = -5
-            z0 = 0
+        x0 = -5
+        y0 = -5
+        z0 = 0
         ic = [x0, y0, z0]
         dim = 3
         var_names = ["z_1", "z_2", "z_3"]
@@ -129,6 +95,8 @@ def data_generation(
         ]
     )
 
+    # add measurement noise
+    x = np.array([add_lognormal_noise(x_, measurement_noise_factor)[0] for x_ in x])
     x_test = np.array(
         [
             scipy.integrate.odeint(lambda x, t: ode(t, x, a=a, b=b, c=c), x0_, t)
@@ -137,23 +105,8 @@ def data_generation(
     )
 
     # calculate time derivatives
-    dxdt_noise_less = [np.array(np.gradient(x_, t[1] - t[0], axis=0)) for x_ in x]
-    dxdt_test = [np.array(np.gradient(x_, t[1] - t[0], axis=0)) for x_ in x_test]
-
-    # add measurement noise
-    x = np.array([add_lognormal_noise(x_, measurement_noise_factor)[0] for x_ in x])
-
     dxdt = [np.array(np.gradient(x_, t[1] - t[0], axis=0)) for x_ in x]
-
-    # relative noise on the time derivatives
-    rel_noise = np.linalg.norm(
-        np.array(dxdt_noise_less) - np.array(dxdt)
-    ) / np.linalg.norm(np.array(dxdt_noise_less))
-    print(f"Relative noise on the time derivatives: {rel_noise * 100:.2f}%")
-
-    # dxdt = np.array(
-    #     [add_lognormal_noise(dxdt_, measurement_noise_factor)[0] for dxdt_ in dxdt]
-    # )
+    dxdt_test = [np.array(np.gradient(x_, t[1] - t[0], axis=0)) for x_ in x_test]
 
     return (
         t,
@@ -219,16 +172,13 @@ def data_plot(t, x, dxdt, x_test):
     plt.show(block=False)
 
 
-def training_plot(sindy_layer, trainhist, var_names=None):
+def training_plot(sindy_layer, trainhist, var_names):
     plt.figure()
     plt.title("Loss over epochs")
-    legend = []
-    for key in trainhist.history.keys():
-        if "coeffs" in key:
-            continue
-        plt.semilogy(trainhist.history[key])
-        legend.append(key)
-    plt.legend(legend)
+    plt.semilogy(trainhist.history["loss"])
+    plt.semilogy(trainhist.history["dz"])
+    plt.semilogy(trainhist.history["kl_sindy"])
+    plt.legend(["loss", "dz", "kl_sindy"])
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.show(block=False)
@@ -274,8 +224,8 @@ def uq_plot(t, x_test, t_preds, x_pred, x_uq_mean_sampled, x_uq_std, dim, nt, i_
     for i in range(dim):
         axs[i].fill_between(
             t_preds[i],
-            x_uq_mean_sampled[..., i] - 3 * x_uq_std[..., i],
-            x_uq_mean_sampled[..., i] + 3 * x_uq_std[..., i],
+            x_uq_mean_sampled[i] - 3 * x_uq_std[i],
+            x_uq_mean_sampled[i] + 3 * x_uq_std[i],
             color="grey",
             alpha=0.3,
             label="uncertainty bound (+-3 std)",
@@ -283,7 +233,7 @@ def uq_plot(t, x_test, t_preds, x_pred, x_uq_mean_sampled, x_uq_std, dim, nt, i_
         axs[i].plot(t, x_test[t_0 : t_0 + nt, i], color="black", label="reference")
         axs[i].plot(
             t_preds[i],
-            x_pred[i_test][..., i],
+            x_pred[i],
             color="orange",
             linestyle="--",
             label="mean prediction",
