@@ -22,7 +22,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import config
 
 from keras import backend as K
-from aesindy import VAESindy, AutoencoderSindy, PCAESindy, config
+from vindy import VAESindy, AutoencoderSindy, PCAESindy, config
 from aesindy.libraries import (
     PolynomialLibrary,
     ForceLibrary,

@@ -51,6 +51,54 @@ l_dx = 1e-2 #1e-5  # 1e-5
 # this scripts path + results
 result_dir = os.path.join(os.path.dirname(__file__), "results")
 
+# %% Load Data
+import mat73
+print("Loading data from ", config.reaction_diffusion["processed_data"])
+data = mat73.loadmat(config.reaction_diffusion["processed_data"])
+print("Data loaded.")
+#data = np.load(data_paths, allow_pickle=True)
+
+times = data["t"]
+dt = times[1] - times[0]
+x_full = data["U"]
+
+mu = 0
+sigma = 0.2 
+scale_noise = np.exp(mu)
+x_full_noise = x_full * (
+    np.random.lognormal(mean=0, sigma=sigma, size=x_full.shape)
+    * scale_noise
+)
+n_sims = x_full.shape[-1]
+dxdt_full = np.array([np.gradient(x_full[:, :, :, i], dt, axis=2, edge_order=2) for i in range(n_sims)]
+)
+
+dxdt_full_noise = np.array([np.gradient(x_full_noise[:, :, :, i], dt, axis=2, edge_order=2) for i in range(n_sims)]
+)
+
+plt.figure()
+plt.plot(x_full[25,25,:,0], label='state noise-free')
+plt.plot(x_full_noise[25,25,:,0], label='state noisy')
+plt.legend()
+plt.show()
+
+plt.figure()
+plt.plot(dxdt_full[0,25,25,:], label='state derivative noise-free')
+plt.plot(dxdt_full_noise[0,25,25,:], label='state derivative noisy')
+plt.legend()
+plt.show()
+# %% signal noise ratio
+rms = lambda x: np.sqrt(np.mean(x**2))
+
+SNR_state = rms(x_full_noise) / rms(x_full - x_full_noise)
+SNR_state_derivative = rms(dxdt_full_noise) / rms(dxdt_full - dxdt_full_noise)
+
+SNR_db_state = 20 * np.log10(SNR_state)
+SNR_db_state_derivative = 20 * np.log10(SNR_state_derivative)
+
+print(f"SNR state: {SNR_db_state:.2f} dB")
+print(f"SNR state derivative: {SNR_db_state_derivative:.2f} dB")
+
 #%%
 if noise:
     # for storage reasons we just load the pca components and not the full noisy data
@@ -69,9 +117,26 @@ if noise:
         pca_order=pca_order,
     )
 
+#noise_free
+(t_,
+ x_noise_free,
+ dxdt_noise_free,
+ t_test_,
+ x_test_noise_free,
+ dxdt_test_noise_free,
+ V_,
+ n_sims_,
+ n_timesteps_,
+ ) = load_reactiondiffusion_data(
+    config.reaction_diffusion["processed_data"],
+    pca_order=pca_order,
+    noise=False,
+
+)
 n_timesteps_test = x_test.shape[0] // n_sims
 n_dof = x.shape[1]
 dt = t[1] - t[0]
+
 
  # %% Create Model
 logging.info(

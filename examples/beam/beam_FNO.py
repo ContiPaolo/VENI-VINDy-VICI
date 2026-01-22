@@ -9,8 +9,8 @@ import numpy as np
 import time
 import os
 
-load_model = False
-train = True
+load_model = True
+train = False
 save = False
 # %%
 
@@ -261,15 +261,15 @@ x_pred = autoregressive_predict(
     b_test_traj,
     n_in=n_in,
     n_out=n_out,
-    n_steps=n_t_test - n_in,  # predict the rest of the trajectory
+    n_steps=n_t - n_in,#n_t_test - n_in,  # predict the rest of the trajectory
     device=device,
-)
+)#[:,:-2]
 
 # Ground truth for comparison (skip first n_in since we used them as input)
-x_true = x_test_traj[:, n_in:]
+x_true = x_test_traj[:, n_in:n_t]#-2]
 
 # Compute error
-mse = torch.mean((x_pred[:, :-2] - x_true) ** 2)
+mse = torch.mean((x_pred - x_true) ** 2)
 print(f"Test trajectory MSE: {mse.item():.6f}")
 
 # Plot comparison at a single spatial point (for visualization)
@@ -290,5 +290,102 @@ plt.ylabel("Displacement")
 plt.legend()
 plt.grid()
 plt.show()
+
+# %% # %% PUBLICATION
+X_pred = (x_pred.detach().T @ V[:, :pca_order].T).numpy()
+X_ref = (x_true.T @ V[:, :pca_order].T).numpy()
+print(X_pred.shape, X_ref.shape)
+
+e_disp = np.linalg.norm(X_pred - X_ref)
+e_rel = np.linalg.norm(X_pred - X_ref) / np.linalg.norm(X_ref).max()
+
+
+# %%
+e_disp_tot = []
+e_rel_tot = []
+
+for traj_id in range(x_test_.shape[0]):
+    x_test_traj = torch.tensor(x_test_[traj_id], dtype=torch.float32)  # (n_x, n_t_test)
+    b_test_traj = torch.tensor(b_test_[traj_id, 0], dtype=torch.float32)  # (n_t_test,)
+
+    n_t_test = x_test_traj.shape[1]
+
+    # Initial window for autoregressive rollout
+    x0 = x_test_traj[:, :n_in]  # (n_x, n_in)
+
+    # Run autoregressive prediction for the full test trajectory
+    x_pred = autoregressive_predict(
+        model,
+        x0,
+        b_test_traj,
+        n_in=n_in,
+        n_out=n_out,
+        n_steps=n_t - n_in,#n_t_test - n_in,  # predict the rest of the trajectory
+        device=device,
+    )#[:,:-2]
+
+    # Ground truth for comparison (skip first n_in since we used them as input)
+    x_true = x_test_traj[:, n_in:n_t]#-2]
+
+    X_pred = (x_pred.detach().T @ V[:, :pca_order].T).numpy()
+    X_ref = (x_true.T @ V[:, :pca_order].T).numpy()
+
+    e_disp = np.linalg.norm(X_pred - X_ref)
+    e_rel = np.linalg.norm(X_pred - X_ref) / np.linalg.norm(X_ref).max()
+
+    print(e_rel)
+
+    e_disp_tot.append(e_disp)
+    e_rel_tot.append(e_rel)
+
+
+print("Displacement error:", np.mean(e_disp_tot), np.std(e_disp_tot))
+print("Relative error:", np.mean(e_rel_tot), np.std(e_rel_tot))
+
+# %%
+
+e_rel_vvv = [0.02591016, 0.0288647 , 0.05625405, 0.06080726, 0.06083836,
+       0.05963731, 0.06141348, 0.06120016, 0.06010828, 0.05857439,
+       0.05673582, 0.04620579, 0.02060845, 0.02248403, 0.0303989 ,
+       0.04591778, 0.06088886, 0.0642538 , 0.06797366, 0.07207476,
+       0.08131272, 0.08666467, 0.09882725, 0.1219028 , 0.13076158,
+       0.14767894, 0.05979586, 0.03018645]
+
+plt.plot(e_rel_vvv)
+plt.plot(e_rel_tot)
+
+
+# %%
+
+import time
+times = []
+for traj_id in range(x_test_.shape[0]):
+    x_test_traj = torch.tensor(x_test_[traj_id], dtype=torch.float32)  # (n_x, n_t_test)
+    b_test_traj = torch.tensor(b_test_[traj_id, 0], dtype=torch.float32)  # (n_t_test,)
+
+    # Start timing
+    start_time = time.time()
+
+    # Your commands
+    x_pred = autoregressive_predict(
+        model,
+        x0,
+        b_test_traj,
+        n_in=n_in,
+        n_out=n_out,
+        n_steps=n_t_test - n_in,
+        device=device,
+    )[:, :-2]
+
+    X_pred = (x_pred.detach().T @ V[:, :pca_order].T).numpy()
+
+    # End timing
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Trajectory {traj_id} prediction time: {elapsed_time:.6f} seconds")
+    times.append(elapsed_time)
+
+elapsed_time = np.mean(times)
+print(f"Elapsed time: {elapsed_time:.6f} seconds")
 
 # %%
