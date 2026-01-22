@@ -1,3 +1,4 @@
-beam = dict(
-    data="YOURPATH/mems.npy",
-)
+# Configuration file for simulation data paths
+beam = "YOURPATH/mems.npy"
+reaction_diffusion = "YOURPATH/rd.npy"
+
