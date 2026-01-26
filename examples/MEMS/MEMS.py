@@ -67,23 +67,6 @@ def set_seed(seed):
     random.seed(seed)  # Set Python random seed
 
 
-def load_data():
-    """
-    Load and preprocess the MEMS data.
-
-    Returns:
-        Tuple containing training and test data, PCA components, and other
-        parameters.
-    """
-    logging.info("Loading MEMS data...")
-    return load_beam_data(
-        config.beam,
-        end_time_step=END_TIME_STEP,
-        nth_time_step=NTH_TIME_STEP,
-        pca_order=PCA_ORDER,
-    )
-
-
 def visualize_sample_data(t, x, dxdt, params, n_timesteps):
     """
     Visualize a sample of the training data.
@@ -580,7 +563,12 @@ def main():
         V,
         n_sims,
         n_timesteps,
-    ) = load_data()
+    ) = load_beam_data(
+        config.beam,
+        end_time_step=END_TIME_STEP,
+        nth_time_step=NTH_TIME_STEP,
+        pca_order=PCA_ORDER,
+    )
 
     n_timesteps_test = x_test.shape[0] // n_sims
     n_dof = x.shape[1]

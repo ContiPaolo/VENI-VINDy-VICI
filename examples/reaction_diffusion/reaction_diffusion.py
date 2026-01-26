@@ -21,6 +21,7 @@ import datetime
 import time
 import pickle
 import random
+import mat73
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -33,7 +34,7 @@ from vindy.layers import SindyLayer, VindyLayer
 from vindy.distributions import Laplace
 from vindy.callbacks import SaveCoefficientsCallback
 from vindy.utils import plot_train_history, plot_coefficients_train_history
-from utils import load_reactiondiffusion_data
+from utils import load_reaction_diffusion_data
 
 # Add the examples folder to the Python path (keep compatibility with examples/ imports)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -90,7 +91,6 @@ def load_data(
     Returns the tuple used throughout the rest of the script. This function mirrors the
     previous inline loading logic but keeps everything in a callable form.
     """
-    import mat73
 
     # Ensure config is available and has the expected attribute
     if config is None or not hasattr(config, "reaction_diffusion"):
@@ -101,43 +101,18 @@ def load_data(
 
     config_path = config.reaction_diffusion
     logging.info("Loading data from %s", config_path)
-    data = mat73.loadmat(config_path)
-    logging.info("Data loaded.")
 
-    # original file provided full-field snapshots in data['U'] and time in data['t']
-    times = data["t"]
-    dt = times[1] - times[0]
-    x_full = data["U"]
-
-    # noise / preprocessing branch: reuse utility if available (preferred)
-    if noise:
-        (
-            t,
-            x,
-            dxdt,
-            t_test,
-            x_test,
-            dxdt_test,
-            V,
-            n_sims,
-            n_timesteps,
-        ) = load_reactiondiffusion_data(config.reaction_diffusion, pca_order=pca_order)
-    else:
-        # Fallback: create minimal shapes from the full data. This path is less tested.
-        t = times
-        dt = t[1] - t[0]
-        # Assume x_full shape is (nx, ny, nt, n_sims)
-        n_sims = x_full.shape[-1]
-        # collapse spatial dims to PCA_ORDER using simple truncation (fallback behavior)
-        V = np.eye(x_full.shape[0] * x_full.shape[1])
-        n_timesteps = x_full.shape[2]
-        # vectorize temporal data as (n_sims * n_timesteps, pca_order)
-        x = np.zeros((n_sims * n_timesteps, pca_order))
-        dxdt = np.zeros_like(x)
-        # create trivial test splits
-        t_test = t[:n_timesteps]
-        x_test = x[:n_timesteps]
-        dxdt_test = dxdt[:n_timesteps]
+    (
+        t,
+        x,
+        dxdt,
+        t_test,
+        x_test,
+        dxdt_test,
+        V,
+        n_sims,
+        n_timesteps,
+    ) = load_reaction_diffusion_data(config_path, pca_order=pca_order)
 
     # Parameters are not present in this dataset by default — create empty placeholders
     params = np.zeros((x.shape[0], 0)) if hasattr(x, "shape") else np.zeros((0, 0))
