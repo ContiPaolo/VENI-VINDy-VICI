@@ -1,5 +1,6 @@
 import logging
 import sys
+import os
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from vindy.utils import *
@@ -110,7 +111,7 @@ def preprocess_data(noise_level=0.02, reduced_order=32, plots=False):
 
     # save data
     logging.info("Saving processed data")
-    dir = os.path.split(config.beam_data[0])[0]
+    save_dir = os.path.split(config.beam_data[0])[0]
     save_data = dict(
         x=x_pca,
         dxdt=dxdt_pca,
@@ -128,7 +129,8 @@ def preprocess_data(noise_level=0.02, reduced_order=32, plots=False):
         n_sims=n_sims,
         n_timesteps=n_timesteps,
     )
-    with open(os.path.join(dir, "data.npy"), "wb") as out_file:
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, "data.npy"), "wb") as out_file:
         pickle.dump(save_data, out_file, pickle.HIGHEST_PROTOCOL)
 
     if plots:
@@ -185,7 +187,6 @@ def load_beam_data(
     """
 
     # check if data path is valid
-    # todo: put correct Zenodo link here
     if not os.path.isfile(data_paths):
         raise FileNotFoundError(
             f"Data file {data_paths} not found. "

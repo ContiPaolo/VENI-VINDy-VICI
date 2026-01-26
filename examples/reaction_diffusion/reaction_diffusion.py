@@ -34,7 +34,7 @@ from vindy.layers import SindyLayer, VindyLayer
 from vindy.distributions import Laplace
 from vindy.callbacks import SaveCoefficientsCallback
 from vindy.utils import plot_train_history, plot_coefficients_train_history
-from utils import load_reaction_diffusion_data
+from utils import load_reaction_diffusion_data, switch_data_format
 
 # Add the examples folder to the Python path (keep compatibility with examples/ imports)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -59,7 +59,7 @@ NTH_TIME_STEP = 3
 SECOND_ORDER = False
 
 BETA_VINDY = 2e-5
-BETA_VAE = 1e-4
+BETA_VAE = 1e-3
 L_REC = 1e-2
 L_DZ = 4e0
 L_DX = 1e-2
@@ -67,8 +67,8 @@ L_DX = 1e-2
 RESULT_DIR = os.path.join(os.path.dirname(__file__), "results")
 
 # Training defaults (can be overridden by calling train_model with args)
-LOAD_MODEL = False
-EPOCHS = 2500
+LOAD_MODEL = False  # False True
+EPOCHS = 5000
 BATCH_SIZE = None  # computed later based on data
 
 # ----------------------
@@ -102,40 +102,7 @@ def load_data(
     config_path = config.reaction_diffusion
     logging.info("Loading data from %s", config_path)
 
-    (
-        t,
-        x,
-        dxdt,
-        t_test,
-        x_test,
-        dxdt_test,
-        V,
-        n_sims,
-        n_timesteps,
-    ) = load_reaction_diffusion_data(config_path, pca_order=pca_order)
-
-    # Parameters are not present in this dataset by default — create empty placeholders
-    params = np.zeros((x.shape[0], 0)) if hasattr(x, "shape") else np.zeros((0, 0))
-    params_test = (
-        np.zeros((x_test.shape[0], 0)) if hasattr(x_test, "shape") else np.zeros((0, 0))
-    )
-
-    return (
-        t,
-        params,
-        x,
-        dxdt,
-        None,  # dxddt (not provided/generated here)
-        t_test,
-        params_test,
-        x_test,
-        dxdt_test,
-        None,  # dxddt_test
-        None,  # ref_coords (not used)
-        V,
-        n_sims,
-        n_timesteps,
-    )
+    return load_reaction_diffusion_data(config_path, pca_order=pca_order)
 
 
 def create_model(x, params, dt, n_dof):
@@ -159,16 +126,11 @@ def create_model(x, params, dt, n_dof):
         fixed_coeffs=None,
     )
 
-    if IDENTIFICATION_LAYER == "vindy":
-        sindy_layer = VindyLayer(
-            beta=BETA_VINDY,
-            priors=Laplace(0.0, 1.0),
-            **layer_params,
-        )
-    elif IDENTIFICATION_LAYER == "sindy":
-        sindy_layer = SindyLayer(**layer_params)
-    else:
-        raise ValueError('IDENTIFICATION_LAYER must be either "vindy" or "sindy"')
+    sindy_layer = VindyLayer(
+        beta=BETA_VINDY,
+        priors=Laplace(0.0, 1.0),
+        **layer_params,
+    )
 
     veni = VENI(
         sindy_layer=sindy_layer,
@@ -233,7 +195,6 @@ def train_model(
                 monitor="val_loss",
                 verbose=0,
             ),
-            tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1),
             SaveCoefficientsCallback(),
         ]
 
@@ -277,16 +238,16 @@ def train_model(
 # ----------------------
 
 
-def switch_data_format(data, n_sims, n_timesteps):
-    """Switch between vectorized and simulation-wise data formats."""
-    if data is None:
-        return None
-    if data.ndim == 2 and data.shape[0] == n_sims * n_timesteps:
-        return data.reshape(n_sims, n_timesteps, -1)
-    elif data.ndim == 3 and data.shape[0] == n_sims and data.shape[1] == n_timesteps:
-        return data.reshape(-1, data.shape[-1])
-    else:
-        return data
+# def switch_data_format(data, n_sims, n_timesteps):
+#     """Switch between vectorized and simulation-wise data formats."""
+#     if data is None:
+#         return None
+#     if data.ndim == 2 and data.shape[0] == n_sims * n_timesteps:
+#         return data.reshape(n_sims, n_timesteps, -1)
+#     elif data.ndim == 3 and data.shape[0] == n_sims and data.shape[1] == n_timesteps:
+#         return data.reshape(-1, data.shape[-1])
+#     else:
+#         return data
 
 
 def training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni):
@@ -312,19 +273,16 @@ def perform_inference(
     x_test_scaled,
     dxdt_test_scaled,
     t_test,
-    params_test,
     test_ids,
     n_sims,
-    n_timesteps_test,
+    n_timesteps,
 ):
     """Perform inference on test trajectories and plot results."""
-    T_test = switch_data_format(t_test, n_sims, n_timesteps_test)
+    T_test = switch_data_format(t_test, n_sims, n_timesteps, target_format="3d")
     z_test, dzdt_test = veni.calc_latent_time_derivatives(
         x_test_scaled, dxdt_test_scaled
     )
-    z_test = switch_data_format(z_test, n_sims, n_timesteps_test)
-    dzdt_test = switch_data_format(dzdt_test, n_sims, n_timesteps_test)
-    Params_test = switch_data_format(params_test, n_sims, n_timesteps_test)
+    z_test = switch_data_format(z_test, n_sims, n_timesteps, target_format="3d")
 
     z_preds = []
     t_preds = []
@@ -333,9 +291,8 @@ def perform_inference(
         logging.info("Processing trajectory %d/%d", i + 1, len(test_ids))
         # Perform integration
         sol = veni.integrate(
-            np.concatenate([z_test[i_test, 0], dzdt_test[i_test, 0]]).squeeze(),
+            z_test[i_test, 0],
             T_test[i_test].squeeze(),
-            mu=Params_test[i_test] if Params_test is not None else None,
         )
         z_preds.append(sol.y)
         t_preds.append(sol.t)
@@ -377,28 +334,25 @@ def perform_forward_uq(
     veni,
     x_test,
     dxdt_test,
-    dxddt_test,
-    params_test,
     t_test,
     test_ids,
     n_traj,
     n_sims,
-    n_timesteps_test,
+    n_timesteps,
     sigma=3,
 ):
     """Perform forward uncertainty quantification by sampling coefficients and integrating."""
     # Try to switch data format to simulation-wise arrays
-    X_test = switch_data_format(x_test, n_sims, n_timesteps_test)
-    DXDT_test = switch_data_format(dxdt_test, n_sims, n_timesteps_test)
-    PARAMS_test = switch_data_format(params_test, n_sims, n_timesteps_test)
-    T_test = switch_data_format(t_test, n_sims, n_timesteps_test)
+    X_test = switch_data_format(x_test.numpy(), n_sims, n_timesteps, target_format="3d")
+    DXDT_test = switch_data_format(
+        dxdt_test.numpy(), n_sims, n_timesteps, target_format="3d"
+    )
+    T_test = switch_data_format(t_test, n_sims, n_timesteps, target_format="3d")
 
     # Calculate latent time derivatives
-    z_test, dzdt_test, dzddt_test = veni.calc_latent_time_derivatives(
-        x_test, dxdt_test, dxddt_test
-    )
-    z_test = switch_data_format(z_test, n_sims, n_timesteps_test)
-    dzdt_test = switch_data_format(dzdt_test, n_sims, n_timesteps_test)
+    z_test, dzdt_test = veni.calc_latent_time_derivatives(x_test, dxdt_test)
+    z_test = switch_data_format(z_test, n_sims, n_timesteps, target_format="3d")
+    dzdt_test = switch_data_format(dzdt_test, n_sims, n_timesteps, target_format="3d")
 
     # Store the original coefficients
     kernel_orig, kernel_scale_orig = (
@@ -418,11 +372,7 @@ def perform_forward_uq(
             # Use layer helper if available
             try:
                 sol, coeffs = veni.sindy_layer.integrate_uq(
-                    np.concatenate(
-                        [z_test[i_test][0:1], dzdt_test[i_test][0:1]]
-                    ).squeeze(),
-                    T_test[i_test].squeeze(),
-                    mu=PARAMS_test[i_test] if PARAMS_test is not None else None,
+                    z_test[i_test][0:1], T_test[i_test].squeeze()
                 )
                 sol_list.append(sol.y)
                 sol_list_t.append(sol.t)
@@ -436,11 +386,7 @@ def perform_forward_uq(
                 z0, dzdt0 = veni.calc_latent_time_derivatives(
                     X_test[i_test][0:1], DXDT_test[i_test][0:1]
                 )
-                sol = veni.integrate(
-                    np.concatenate([z0, dzdt0]).squeeze(),
-                    T_test[i_test].squeeze(),
-                    mu=PARAMS_test[i_test] if PARAMS_test is not None else None,
-                )
+                sol = veni.integrate(z0.squeeze(), T_test[i_test].squeeze())
                 sol_list.append(sol.y)
                 sol_list_t.append(sol.t)
 
@@ -456,9 +402,8 @@ def perform_forward_uq(
             X_test[i_test][0:1], DXDT_test[i_test][0:1]
         )
         sol = veni.integrate(
-            np.concatenate([z0, dzdt0]).squeeze(),
+            z0.squeeze(),
             T_test[i_test].squeeze(),
-            mu=PARAMS_test[i_test] if PARAMS_test is not None else None,
         )
         uq_means.append(sol.y)
 
@@ -518,29 +463,20 @@ def main():
     # Load data
     (
         t,
-        params,
         x,
         dxdt,
-        dxddt,
         t_test,
-        params_test,
         x_test,
         dxdt_test,
-        dxddt_test,
-        ref_coords,
         V,
         n_sims,
         n_timesteps,
+        n_sims_test,
+        n_timesteps_test,
     ) = load_data(pca_order=PCA_ORDER, noise=NOISE, nth_time_step=NTH_TIME_STEP)
 
-    n_timesteps_test = (
-        x_test.shape[0] // n_sims if (x_test is not None and n_sims > 0) else 0
-    )
-    n_dof = x.shape[1] if x is not None else 1
-    dt = t[1] - t[0] if t is not None and len(t) > 1 else 1.0
-
     # Create model
-    veni = create_model(x, params, dt, n_dof)
+    veni = create_model(x, params=None, dt=t[1] - t[0], n_dof=x.shape[1])
 
     # Scale data
     veni.define_scaling(x)
@@ -548,7 +484,9 @@ def main():
     x_test_scaled, dxdt_test_scaled = veni.scale(x_test), veni.scale(dxdt_test)
 
     # Prepare inputs for training (keep original slicing heuristic)
-    split_train = int(14 * n_timesteps) if n_timesteps else int(0.7 * x.shape[0])
+    split_train = (
+        int((n_sims - 2) * n_timesteps) if n_timesteps else int(0.7 * x.shape[0])
+    )
     x_input = [x_train_scaled[:split_train], dxdt_train_scaled[:split_train]]
     x_input_val = [x_train_scaled[split_train:], dxdt_train_scaled[split_train:]]
 
@@ -581,23 +519,22 @@ def main():
 
     # Sparsify coefficients
     try:
-        veni.sindy_layer.pdf_thresholding(threshold=0.001)
+        veni.sindy_layer.pdf_thresholding(threshold=5)
     except Exception as e:
         logging.warning("Sparsification failed: %s", e)
 
     # Inference + UQ
     logging.info("Performing inference and forward UQ...")
     n_traj = 10
-    test_ids = [1, 10] if n_sims > 10 else list(range(min(2, n_sims)))
+    test_ids = list(range(n_sims_test))
 
     z_preds, t_preds = perform_inference(
         veni,
         x_test_scaled,
         dxdt_test_scaled,
         t_test,
-        params_test,
         test_ids,
-        n_sims,
+        n_sims_test,
         n_timesteps_test,
     )
 
@@ -605,12 +542,10 @@ def main():
         veni,
         x_test_scaled,
         dxdt_test_scaled,
-        dxddt_test,
-        params_test,
         t_test,
         test_ids,
         n_traj,
-        n_sims,
+        n_sims_test,
         n_timesteps_test,
     )
 
@@ -619,7 +554,7 @@ def main():
         uq_results["uq_ys_mean"],
         uq_results["uq_ys_mean_sampled"],
         uq_results["uq_ys_std"],
-        switch_data_format(t_test, n_sims, n_timesteps_test),
+        switch_data_format(t_test, n_sims_test, n_timesteps_test, target_format="3d"),
         uq_results["z_test"],
         test_ids,
     )

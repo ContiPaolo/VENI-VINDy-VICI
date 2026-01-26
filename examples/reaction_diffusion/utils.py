@@ -1,5 +1,6 @@
 import logging
 import sys
+import os
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.decomposition import PCA
@@ -77,77 +78,27 @@ def load_reaction_diffusion_data(
         times_train (np.ndarray): Training time data.
     """
 
-    print("Loading data from ", data_paths)
-    data = mat73.loadmat(data_paths)
-    print("Data loaded.")
-    # data = np.load(data_paths, allow_pickle=True)
+    if not os.path.isfile(data_paths):
+        raise FileNotFoundError(
+            f"Data file {data_paths} not found. "
+            f"Please download the file from Zenodo (http://doi.org/10.5281/zenodo.18313843) and "
+            f"specify the correct path in the examples/config.py file."
+        )
 
-    times = data["t"]
-    dt = times[1] - times[0]
-    x_full = data["U"]
-    Nx_hf, Ny_hf, n_timesteps, n_sims = x_full.shape
-    N = Nx_hf * Ny_hf
+    with open(data_paths, "rb") as f:
+        data = pickle.load(f)
+        x = data["x"]
+        time = data["t"]
+
+    n_sims, n_timesteps, Nx_hf, Ny_hf, n_channels = x.shape
     n_timesteps_train = int(n_timesteps / 2)
+    dt = time[1] - time[0]
 
-    # reduce dimensionality with POD
-    # if pod:
-    #     x_pod_u_train = np.reshape(
-    #         data["U"][:, :, :n_timesteps_train, :], (N, n_timesteps_train * n_sims), "F"
-    #     )
-    #     x_pod_v_train = np.reshape(
-    #         data["V"][:, :, :n_timesteps_train, :], (N, n_timesteps_train * n_sims), "F"
-    #     )
-    #     x_pod_train = np.concatenate((x_pod_u_train, x_pod_v_train))
-    #     # apply noise to the high-dimensional training data
-    #     if noise:
-    #         mu = 0
-    #         sigma = 0.2
-    #         scale_noise = np.exp(mu)
-    #         np.random.seed(seed)
-    #         x_pod_train *= (
-    #             np.random.lognormal(mean=0, sigma=sigma, size=x_pod_train.shape)
-    #             * scale_noise
-    #         )
-    #
-    #     U, S, _ = compute_randomized_SVD(x_pod_train, pca_order, N * 2, 1)
-    #     x_pod_u = np.reshape(data["U"], (N, n_timesteps * n_sims), "F")
-    #     x_pod_v = np.reshape(data["V"], (N, n_timesteps * n_sims), "F")
-    #     x_pod = np.concatenate((x_pod_u, x_pod_v))
-    #     x = x_pod.T @ U
-    #     x = np.reshape(x, (n_sims, n_timesteps, pca_order))
-    # else:
-    #     # ensure x has shape (n_sims, n_timesteps, Nx, Ny, channels)
-    #     x = data["U"].transpose(3, 2, 0, 1).reshape(n_sims, n_timesteps, N)
-    #     U = None
-
-    # build full state with both channels in the last dimension: (n_sims, n_timesteps, Nx, Ny, 2)
-    x = np.concatenate(
-        (
-            data["U"].transpose(3, 2, 0, 1)[..., np.newaxis],
-            data["V"].transpose(3, 2, 0, 1)[..., np.newaxis],
-        ),
-        axis=-1,
-    )
-    # reduce time steps for faster training to 20 seconds for training and 40 seconds for testing
-    if short:
-        n_timesteps = 800
-        n_timesteps_train = int(n_timesteps / 2)
-    x = x[:, :n_timesteps:nth_time_step, :, :]
-    times = times[:n_timesteps:nth_time_step]
-    n_timesteps = x.shape[1]
     x_train, x_test = train_test_split(x, test_size=0.2, random_state=seed)
-    dxdt_test = np.array(
-        [
-            np.gradient(x_test[i, :, :, :], dt, axis=0, edge_order=2)
-            for i in range(x_test.shape[0])
-        ]
-    )
+    n_sims_train, n_sims_test = x_train.shape[0], x_test.shape[0]
 
-    # perform SVD
-    # x_train has shape (n_sims, n_timesteps, Nx, Ny, channels)
+    # reduce time steps for training data
     x_train = x_train[:, :n_timesteps_train]
-    n_sims_train = x_train.shape[0]
-    channels = x_train.shape[-1]
 
     # apply noise
     mu = 0
@@ -158,11 +109,9 @@ def load_reaction_diffusion_data(
     )
 
     # compute time derivatives of noisy data
-    # Use a vectorized gradient call along the time axis (axis=1 for shape (n_sims, n_timesteps, ...)).
-    # This ensures the same dt is used for all simulations and avoids scaling mismatches
-    # versus calling np.gradient on a single 1D trace without specifying dt.
-    # Example: for a single trajectory `x0 = x_train[0, :, 0, 0, 0]` compute `np.gradient(x0, dt, edge_order=2)`.
-    dxdt = np.gradient(x_train, dt, axis=1, edge_order=2)
+    dxdt_train = np.gradient(x_train, dt, axis=1, edge_order=2)
+    # compute time derivatives of clean test data
+    dxdt_test = np.gradient(x_test, dt, axis=1, edge_order=2)
 
     # create data matrix S with shape (channels * N, n_sims_train * n_timesteps_train)
     x_train_2d = switch_data_format(
@@ -181,23 +130,23 @@ def load_reaction_diffusion_data(
         x_rec_2d,
         n_sims_train,
         n_timesteps_train,
-        spatial_shape=(Nx_hf, Ny_hf, channels),
+        spatial_shape=(Nx_hf, Ny_hf, n_channels),
         target_format="5d",
     )
 
     dxdt_2d = switch_data_format(
-        dxdt, n_sims_train, n_timesteps_train, target_format="2d"
+        dxdt_train, n_sims_train, n_timesteps_train, target_format="2d"
     )
     dxdt_rec_2d = pca.inverse_transform(pca.transform(dxdt_2d))
     dxdt_rec = switch_data_format(
         dxdt_rec_2d,
         n_sims_train,
         n_timesteps_train,
-        spatial_shape=(Nx_hf, Ny_hf, channels),
+        spatial_shape=(Nx_hf, Ny_hf, n_channels),
         target_format="5d",
     )
     plt.title("Noisy sample")
-    plt.imshow(dxdt[0, 0, :, :, 0])
+    plt.imshow(dxdt_train[0, 0, :, :, 0])
     plt.show()
     plt.title("Rec sample")
     plt.imshow(dxdt_rec[0, 0, :, :, 0])
@@ -212,29 +161,29 @@ def load_reaction_diffusion_data(
 
     # reconstruct and visualize a sample to verify reshapes
     # original training data reshaped to (n_sims_train, n_timesteps_train, Nx, Ny, channels)
+    time_train = np.tile(time, x.shape[0]).reshape(-1, 1)
+    time_test = np.tile(time, x_test.shape[0]).reshape(-1, 1)
 
-    # project onto POD basis: x_train_2d (samples, features) @ U2 (features, pca)
-    x_train_pod = (x_train_2d @ U2).reshape(n_sims_train, n_timesteps_train, -1)
-
-    # reconstruct from POD: (samples, pca) @ U2.T -> (samples, features) then reshape back to spatial shape
-    x_rec_from_pod = (x_train_pod.reshape(-1, x_train_pod.shape[-1]) @ U2.T).reshape(
-        n_sims_train, n_timesteps_train, Nx_hf, Ny_hf, channels
+    # reduce data to pca modes
+    dxdt_pca_2d = pca.transform(dxdt_2d)
+    x_pca_test_2d = pca.transform(
+        switch_data_format(x_test, n_sims_test, n_timesteps, target_format="2d")
     )
-    plt.imshow(x_rec_from_pod[0, 0, :, :, 1])
-    plt.show()
-
-    times_train = np.tile(times, x.shape[0]).reshape(-1, 1)
-    times_test = np.tile(times, x_test.shape[0]).reshape(-1, 1)
+    dxdt_pca_test_2d = pca.transform(
+        switch_data_format(dxdt_test, n_sims_test, n_timesteps, target_format="2d")
+    )
 
     return (
-        times_train,
-        x,
-        dxdt,
-        times_test,
-        x_test,
-        dxdt_test,
+        time_train,
+        x_pca_2d,
+        dxdt_pca_2d,
+        time_test,
+        x_pca_test_2d,
+        dxdt_pca_test_2d,
         V,
-        n_sims,
+        n_sims_train,
+        n_timesteps_train,
+        n_sims_test,
         n_timesteps,
     )
 
