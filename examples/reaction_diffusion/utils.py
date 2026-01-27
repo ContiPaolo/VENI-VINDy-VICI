@@ -8,15 +8,14 @@ from vindy.utils import *
 import pickle
 
 import mat73
-import scipy.io
+import scipy.io as sio
 from sklearn.utils import extmath
 import datetime
 from sklearn.model_selection import train_test_split
 import time
 
-# Add the examples folder to the Python path
+# Add the examples folder to the Python path (kept for compatibility if callers need it)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import config
 
 
 def compute_randomized_SVD(S, N_POD, N_h, n_channels, name="", verbose=False):
@@ -181,6 +180,9 @@ def load_reaction_diffusion_data(
         x_pca_test_2d,
         dxdt_pca_test_2d,
         V,
+        pca.mean_,
+        (Nx_hf, Ny_hf, n_channels),
+        x_test,
         n_sims_train,
         n_timesteps_train,
         n_sims_test,

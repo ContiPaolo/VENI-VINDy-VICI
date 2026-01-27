@@ -393,10 +393,27 @@ def perform_forward_uq(
         uq_means.append(sol.y)
 
     uq_ys = np.array(uq_ys)
+    # uq_ys currently has shape (n_tests, n_traj, n_states, n_timesteps)
+    # transpose to (n_tests, n_traj, n_timesteps, n_states)
+    try:
+        uq_ys = np.transpose(uq_ys, (0, 1, 3, 2))
+    except Exception:
+        # fallback: if shape is already (n_tests, n_traj, n_timesteps, n_states)
+        pass
+
+    # now compute statistics across trajectories -> shapes (n_tests, n_timesteps, n_states)
     uq_ys_mean_sampled = np.mean(uq_ys, axis=1)
     uq_ys_std = np.std(uq_ys, axis=1)
-    uq_ys_mean = np.array(uq_means)
 
+    # uq_means list contains mean simulations with shape (n_states, n_timesteps)
+    uq_ys_mean = np.array(uq_means)
+    try:
+        uq_ys_mean = np.transpose(uq_ys_mean, (0, 2, 1))
+    except Exception:
+        # if already (n_tests, n_timesteps, n_states), keep as is
+        pass
+
+    # compute bounds in (n_tests, n_timesteps, n_states)
     uq_ys_lb = uq_ys_mean - sigma * uq_ys_std
     uq_ys_ub = uq_ys_mean + sigma * uq_ys_std
 
@@ -422,12 +439,16 @@ def uq_plots(
         if n_test == 1:
             axs = [axs]
         for i, i_test in enumerate(test_ids):
-            axs[i].plot(t_test[i_test], z_test[i_test][:, 0], color="blue")
-            axs[i].plot(uq_ts[i][0], uq_ys_mean[i][0], color="red", linestyle="--")
+            # t_test[i_test] is (n_timesteps, ...) -> use flattened times
+            tvals = np.array(t_test[i_test]).squeeze()
+            # z_test is (n_sims, n_timesteps, n_states)
+            axs[i].plot(tvals, z_test[i_test][:, 0], color="blue")
+            # uq_ys_mean, uq_ys_mean_sampled, uq_ys_std have shape (n_tests, n_timesteps, n_states)
+            axs[i].plot(tvals, uq_ys_mean[i][:, 0], color="red", linestyle="--")
             axs[i].fill_between(
-                uq_ts[i][0],
-                uq_ys_mean_sampled[i][0] - 3 * uq_ys_std[i][0],
-                uq_ys_mean_sampled[i][0] + 3 * uq_ys_std[i][0],
+                tvals,
+                uq_ys_mean_sampled[i][:, 0] - 3 * uq_ys_std[i][:, 0],
+                uq_ys_mean_sampled[i][:, 0] + 3 * uq_ys_std[i][:, 0],
                 color="red",
                 alpha=0.3,
             )
@@ -435,6 +456,158 @@ def uq_plots(
         plt.show()
     except Exception as e:
         logging.warning("UQ plotting failed: %s", e)
+
+
+def plot_latent_phase(z_true, z_mean_preds, test_ids, dims=(0, 1), figsize=(8, 6)):
+    """
+    Phase plot of latent variables for selected test trajectories.
+    z_true: (n_sims, n_timesteps, state_dim)
+    z_mean_preds: (n_sims, state_dim, n_timesteps) or list of arrays
+    """
+    try:
+        for idx in test_ids:
+            zt = z_true[idx]  # time x state_dim
+            zm = z_mean_preds[idx]
+            # normalize shapes to (time, state_dim)
+            if zm.ndim == 2 and zm.shape[0] == zt.shape[0]:
+                zm_t = zm
+            else:
+                zm_t = zm.T
+            plt.figure(figsize=figsize)
+            plt.plot(
+                zt[:, dims[0]], zt[:, dims[1]], "-o", ms=3, label="Reference", alpha=0.7
+            )
+            plt.plot(
+                zm_t[:, dims[0]],
+                zm_t[:, dims[1]],
+                "--",
+                lw=2,
+                label="Mean pred",
+                alpha=0.9,
+            )
+            plt.scatter(
+                zt[0, dims[0]], zt[0, dims[1]], c="green", marker="s", label="start"
+            )
+            plt.xlabel(f"z[{dims[0]}]")
+            plt.ylabel(f"z[{dims[1]}]")
+            plt.title(f"Latent phase plot - sim {idx}")
+            plt.legend()
+            plt.grid(True)
+            plt.tight_layout()
+            plt.show()
+    except Exception as e:
+        logging.warning("plot_latent_phase failed: %s", e)
+
+
+def plot_rd_uq_imshow(
+    veni,
+    uq_results,
+    V,
+    pca_mean,
+    x_test_original,
+    test_ids,
+    spatial_shape,
+    channel=0,
+    times_to_plot=None,
+    cmap="viridis",
+    figsize=(12, 4),
+):
+    """
+    Show RD (2D) reference, mean prediction, and variance prediction using imshow.
+    - uq_results: dict returned by perform_forward_uq
+      * 'uq_ys' expected shape: (n_tests, n_traj, state_dim, time)
+      * 'uq_ys_mean' expected shape: (n_tests, state_dim, time)
+    - V: PCA components matrix (features x components)
+    - pca_mean: PCA mean vector (features,)
+    - x_test_original: original spatial test data (n_sims, n_timesteps, Nx, Ny, nch)
+    - spatial_shape: (Nx, Ny, nch)
+    """
+    try:
+        Nx, Ny, nch = spatial_shape
+        n_sims, n_timesteps, _, _, _ = x_test_original.shape
+        if times_to_plot is None:
+            times_to_plot = [0, n_timesteps // 2, n_timesteps - 1]
+
+        # helper: latent (time,state) -> physical (time,features)
+        def latent_to_phys(traj_time_state, V, pca_mean):
+            # traj_time_state: (time, state_dim)
+            # V: features x components -> reconstruct features = traj @ V.T + mean
+            if V.shape[1] != traj_time_state.shape[1]:
+                # accept V transposed
+                if V.shape[0] == traj_time_state.shape[1]:
+                    return traj_time_state.dot(V).astype(np.float32)
+                raise ValueError("Incompatible V shape vs latent dim")
+            return traj_time_state.dot(V.T) + pca_mean
+
+        for i_idx, idx in enumerate(test_ids):
+            # true field
+            x_true = x_test_original[idx]  # time x Nx x Ny x nch
+
+            # mean latent
+            z_mean = uq_results["uq_ys_mean"][i_idx]
+            # ensure shape (time, state)
+            if z_mean.ndim == 2 and z_mean.shape[0] == n_timesteps:
+                z_mean_t = z_mean
+            else:
+                z_mean_t = z_mean.T
+
+            # decode latent -> PCA-coordinates using the VENI decoder
+            # veni.decode expects input shape (n_samples, state_dim)
+            x_pca_mean = veni.decode(z_mean_t)
+            x_pca_mean = np.asarray(x_pca_mean)
+
+            # PCA inverse: PCA components_ is V.T, mean is pca_mean
+            x_mean_phys = x_pca_mean.dot(V.T) + pca_mean
+            x_mean_phys = x_mean_phys.reshape(n_timesteps, Nx, Ny, nch)
+
+            # samples -> phys
+            samples = uq_results["uq_ys"][i_idx]  # (n_traj, time, state)
+
+            # decode each sample from latent -> PCA coords, then PCA inverse to phys
+            phys_samples_list = []
+            for s in samples:
+                # s should be (time, state)
+                x_pca_s = veni.decode(s)
+                x_pca_s = np.asarray(x_pca_s)
+                x_full_s = x_pca_s.dot(V.T) + pca_mean
+                phys_samples_list.append(x_full_s.reshape(n_timesteps, Nx, Ny, nch))
+            phys_samples = np.stack(phys_samples_list, axis=0)
+            x_std_phys = np.std(phys_samples, axis=0)
+
+            for t_idx in times_to_plot:
+                if t_idx < 0 or t_idx >= n_timesteps:
+                    continue
+                fig, axs = plt.subplots(1, 3, figsize=figsize)
+                vmin = min(
+                    x_true[t_idx, :, :, channel].min(),
+                    x_mean_phys[t_idx, :, :, channel].min(),
+                )
+                vmax = max(
+                    x_true[t_idx, :, :, channel].max(),
+                    x_mean_phys[t_idx, :, :, channel].max(),
+                )
+
+                im0 = axs[0].imshow(
+                    x_true[t_idx, :, :, channel], cmap=cmap, vmin=vmin, vmax=vmax
+                )
+                axs[0].set_title(f"Reference (sim {idx}) t={t_idx}")
+                plt.colorbar(im0, ax=axs[0])
+
+                im1 = axs[1].imshow(
+                    x_mean_phys[t_idx, :, :, channel], cmap=cmap, vmin=vmin, vmax=vmax
+                )
+                axs[1].set_title("Mean prediction")
+                plt.colorbar(im1, ax=axs[1])
+
+                im2 = axs[2].imshow(x_std_phys[t_idx, :, :, channel], cmap="magma")
+                axs[2].set_title("Prediction std")
+                plt.colorbar(im2, ax=axs[2])
+
+                plt.suptitle(f"Simulation {idx} - time {t_idx}")
+                plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+                plt.show()
+    except Exception as e:
+        logging.warning("plot_rd_uq_imshow failed: %s", e)
 
 
 # ----------------------
@@ -454,6 +627,9 @@ def main():
         x_test,
         dxdt_test,
         V,
+        pca_mean,
+        spatial_shape,
+        x_test_original,
         n_sims,
         n_timesteps,
         n_sims_test,
@@ -543,6 +719,22 @@ def main():
         uq_results["z_test"],
         test_ids,
     )
+
+    # New plots: latent phase and RD UQ images
+    try:
+        plot_latent_phase(uq_results["z_test"], uq_results["uq_ys_mean"], test_ids)
+        plot_rd_uq_imshow(
+            veni,
+            uq_results,
+            V,
+            pca_mean,
+            x_test_original,
+            test_ids,
+            spatial_shape,
+            channel=0,
+        )
+    except Exception as e:
+        logging.warning("Additional plotting failed: %s", e)
 
     # Save some results to disk (best-effort)
     outdir = os.path.join(RESULT_DIR, MODEL_NAME)
