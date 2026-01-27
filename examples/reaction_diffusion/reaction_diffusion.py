@@ -58,8 +58,8 @@ NOISE = True
 NTH_TIME_STEP = 3
 SECOND_ORDER = False
 
-BETA_VINDY = 2e-5
-BETA_VAE = 1e-3
+BETA_VINDY = 1e-4
+BETA_VAE = 2e-5
 L_REC = 1e-2
 L_DZ = 4e0
 L_DX = 1e-2
@@ -67,7 +67,7 @@ L_DX = 1e-2
 RESULT_DIR = os.path.join(os.path.dirname(__file__), "results")
 
 # Training defaults (can be overridden by calling train_model with args)
-LOAD_MODEL = False  # False True
+LOAD_MODEL = True  # False
 EPOCHS = 5000
 BATCH_SIZE = None  # computed later based on data
 
@@ -369,26 +369,11 @@ def perform_forward_uq(
         sol_list_t = []
         for traj in range(n_traj):
             logging.info("\tSample %d/%d", traj + 1, n_traj)
-            # Use layer helper if available
-            try:
-                sol, coeffs = veni.sindy_layer.integrate_uq(
-                    z_test[i_test][0:1], T_test[i_test].squeeze()
-                )
-                sol_list.append(sol.y)
-                sol_list_t.append(sol.t)
-            except Exception:
-                # Fallback: sample kernel directly if integrate_uq not implemented
-                sampled_coeff, _, _ = veni.sindy_layer._coeffs
-                try:
-                    veni.sindy_layer.kernel = tf.reshape(sampled_coeff, (-1, 1))
-                except Exception:
-                    pass
-                z0, dzdt0 = veni.calc_latent_time_derivatives(
-                    X_test[i_test][0:1], DXDT_test[i_test][0:1]
-                )
-                sol = veni.integrate(z0.squeeze(), T_test[i_test].squeeze())
-                sol_list.append(sol.y)
-                sol_list_t.append(sol.t)
+            sol, coeffs = veni.sindy_layer.integrate_uq(
+                z_test[i_test][0], T_test[i_test].squeeze()
+            )
+            sol_list.append(sol.y)
+            sol_list_t.append(sol.t)
 
         uq_ts.append(sol_list_t)
         uq_ys.append(sol_list)
@@ -519,7 +504,7 @@ def main():
 
     # Sparsify coefficients
     try:
-        veni.sindy_layer.pdf_thresholding(threshold=5)
+        veni.sindy_layer.pdf_thresholding(threshold=0.1)
     except Exception as e:
         logging.warning("Sparsification failed: %s", e)
 
