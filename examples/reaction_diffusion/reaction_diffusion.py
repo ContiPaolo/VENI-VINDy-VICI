@@ -502,8 +502,7 @@ def plot_latent_phase(z_true, z_mean_preds, test_ids, dims=(0, 1), figsize=(8, 6
 def plot_rd_uq_imshow(
     veni,
     uq_results,
-    V,
-    pca_mean,
+    pca,
     x_test_original,
     test_ids,
     spatial_shape,
@@ -556,9 +555,59 @@ def plot_rd_uq_imshow(
             x_pca_mean = veni.decode(z_mean_t)
             x_pca_mean = np.asarray(x_pca_mean)
 
-            # PCA inverse: PCA components_ is V.T, mean is pca_mean
-            x_mean_phys = x_pca_mean.dot(V.T) + pca_mean
+            # decoded outputs are in the model's scaled space -> rescale back to PCA coordinate space
+            try:
+                # use the model's rescale method (works with tensors/numpy)
+                x_pca_mean = veni.rescale(tf.convert_to_tensor(x_pca_mean)).numpy()
+            except Exception:
+                # fallback: try dividing by scale_factor if available as numpy
+                try:
+                    scale = np.array(veni.scale_factor)
+                    x_pca_mean = x_pca_mean / scale
+                except Exception:
+                    # last resort: leave as-is and hope scaling was not applied
+                    pass
+
+            # PCA inverse using provided PCA object
+            x_mean_phys = pca.inverse_transform(x_pca_mean)
             x_mean_phys = x_mean_phys.reshape(n_timesteps, Nx, Ny, nch)
+
+            # Diagnostics: compare decoded PCA coords (rescaled) to PCA coords of true field
+            try:
+                # compute true PCA coords from the reference full field
+                x_true_flat = x_true.reshape(n_timesteps, -1)  # (time, features)
+                pca_coords_true = pca.transform(x_true_flat)
+
+                # ensure shapes align
+                if pca_coords_true.shape == x_pca_mean.shape:
+                    mae = np.mean(np.abs(pca_coords_true - x_pca_mean))
+                    max_err = np.max(np.abs(pca_coords_true - x_pca_mean))
+                    logging.info(
+                        "PCA-coords reconstruction error (sim %d): MAE=%.6f, max=%.6f",
+                        idx,
+                        mae,
+                        max_err,
+                    )
+                else:
+                    logging.debug(
+                        "PCA coords shape mismatch (true %s vs decoded %s)",
+                        pca_coords_true.shape,
+                        x_pca_mean.shape,
+                    )
+
+                # Compare physical fields statistics
+                true_min, true_max = x_true.min(), x_true.max()
+                rec_min, rec_max = x_mean_phys.min(), x_mean_phys.max()
+                logging.info(
+                    "Field ranges (sim %d): true[min, max]=[%.4f, %.4f] rec[min, max]=[%.4f, %.4f]",
+                    idx,
+                    true_min,
+                    true_max,
+                    rec_min,
+                    rec_max,
+                )
+            except Exception as e:
+                logging.debug("Diagnostics failed: %s", e)
 
             # samples -> phys
             samples = uq_results["uq_ys"][i_idx]  # (n_traj, time, state)
@@ -569,7 +618,15 @@ def plot_rd_uq_imshow(
                 # s should be (time, state)
                 x_pca_s = veni.decode(s)
                 x_pca_s = np.asarray(x_pca_s)
-                x_full_s = x_pca_s.dot(V.T) + pca_mean
+                try:
+                    x_pca_s = veni.rescale(tf.convert_to_tensor(x_pca_s)).numpy()
+                except Exception:
+                    try:
+                        scale = np.array(veni.scale_factor)
+                        x_pca_s = x_pca_s / scale
+                    except Exception:
+                        pass
+                x_full_s = pca.inverse_transform(x_pca_s)
                 phys_samples_list.append(x_full_s.reshape(n_timesteps, Nx, Ny, nch))
             phys_samples = np.stack(phys_samples_list, axis=0)
             x_std_phys = np.std(phys_samples, axis=0)
@@ -626,8 +683,7 @@ def main():
         t_test,
         x_test,
         dxdt_test,
-        V,
-        pca_mean,
+        pca,
         spatial_shape,
         x_test_original,
         n_sims,
@@ -726,8 +782,7 @@ def main():
         plot_rd_uq_imshow(
             veni,
             uq_results,
-            V,
-            pca_mean,
+            pca,
             x_test_original,
             test_ids,
             spatial_shape,
