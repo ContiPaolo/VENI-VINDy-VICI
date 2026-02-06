@@ -33,11 +33,7 @@ from vindy.libraries import PolynomialLibrary
 from vindy.layers import SindyLayer, VindyLayer
 from vindy.distributions import Laplace
 from vindy.callbacks import SaveCoefficientsCallback
-from vindy.utils import (
-    plot_train_history,
-    plot_coefficients_train_history,
-    switch_data_format,
-)
+from vindy.utils import switch_data_format
 from utils import load_reaction_diffusion_data
 
 # Add the examples folder to the Python path (keep compatibility with examples/ imports)
@@ -47,6 +43,46 @@ try:
     import config
 except Exception:
     config = None
+
+# Import shared utilities
+try:
+    from utils import (
+        set_seed,
+        validate_data_path,
+        plot_train_history,
+        plot_coefficients_train_history,
+        create_result_directory,
+        log_model_summary,
+    )
+except ImportError:
+    # Fallback definitions if examples/utils.py not found
+    def set_seed(seed):
+        tf.random.set_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+
+    def validate_data_path(data_path, zenodo_doi="10.5281/zenodo.18313843"):
+        if not os.path.isfile(data_path):
+            raise FileNotFoundError(
+                f"Data file {data_path} not found. "
+                f"Please download the file from Zenodo (http://doi.org/{zenodo_doi}) and "
+                f"specify the correct path in the examples/config.py file."
+            )
+
+    def plot_train_history(trainhist, result_dir, validation=True):
+        pass
+
+    def plot_coefficients_train_history(trainhist, result_dir):
+        pass
+
+    def create_result_directory(base_dir, model_name):
+        result_dir = os.path.join(base_dir, model_name)
+        os.makedirs(result_dir, exist_ok=True)
+        return result_dir
+
+    def log_model_summary(veni, result_dir=None):
+        pass
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
@@ -78,13 +114,6 @@ BATCH_SIZE = None  # computed later based on data
 # ----------------------
 # Utility functions
 # ----------------------
-
-
-def set_seed(seed: int):
-    """Set seeds for reproducibility."""
-    tf.random.set_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
 
 
 def load_data(
@@ -235,23 +264,6 @@ def train_model(
         trainhist = {}
 
     return trainhist, weights_path, log_dir
-
-
-# ----------------------
-# Helpers: plotting, inference, UQ
-# ----------------------
-
-
-# def switch_data_format(data, n_sims, n_timesteps):
-#     """Switch between vectorized and simulation-wise data formats."""
-#     if data is None:
-#         return None
-#     if data.ndim == 2 and data.shape[0] == n_sims * n_timesteps:
-#         return data.reshape(n_sims, n_timesteps, -1)
-#     elif data.ndim == 3 and data.shape[0] == n_sims and data.shape[1] == n_timesteps:
-#         return data.reshape(-1, data.shape[-1])
-#     else:
-#         return data
 
 
 def training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni):

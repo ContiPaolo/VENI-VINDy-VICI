@@ -17,6 +17,19 @@ import time
 # Add the examples folder to the Python path (kept for compatibility if callers need it)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+# Import shared utilities
+try:
+    from utils import validate_data_path
+except ImportError:
+    # Fallback if examples/utils.py not found
+    def validate_data_path(data_path, zenodo_doi="10.5281/zenodo.18313843"):
+        if not os.path.isfile(data_path):
+            raise FileNotFoundError(
+                f"Data file {data_path} not found. "
+                f"Please download the file from Zenodo (http://doi.org/{zenodo_doi}) and "
+                f"specify the correct path in the examples/config.py file."
+            )
+
 
 def compute_randomized_SVD(S, N_POD, N_h, n_channels, name="", verbose=False):
     if verbose:
@@ -77,12 +90,8 @@ def load_reaction_diffusion_data(
         times_train (np.ndarray): Training time data.
     """
 
-    if not os.path.isfile(data_paths):
-        raise FileNotFoundError(
-            f"Data file {data_paths} not found. "
-            f"Please download the file from Zenodo (http://doi.org/10.5281/zenodo.18313843) and "
-            f"specify the correct path in the examples/config.py file."
-        )
+    # Validate data path
+    validate_data_path(data_paths)
 
     with open(data_paths, "rb") as f:
         data = pickle.load(f)

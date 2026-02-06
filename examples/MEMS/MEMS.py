@@ -26,11 +26,42 @@ from vindy.layers import SindyLayer, VindyLayer
 from vindy.distributions import Laplace
 from vindy.callbacks import SaveCoefficientsCallback
 from vindy.utils import switch_data_format
-from utils import load_beam_data, plot_train_history, plot_coefficients_train_history
+from utils import load_beam_data
 
 # Add the examples folder to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import config
+
+# Import shared utilities
+try:
+    from utils import (
+        set_seed,
+        plot_train_history,
+        plot_coefficients_train_history,
+        create_result_directory,
+        log_model_summary,
+    )
+except ImportError:
+    # Fallback definitions if examples/utils.py not found
+    def set_seed(seed):
+        tf.random.set_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+
+    def plot_train_history(trainhist, result_dir, validation=True):
+        pass
+
+    def plot_coefficients_train_history(trainhist, result_dir):
+        pass
+
+    def create_result_directory(base_dir, model_name):
+        result_dir = os.path.join(base_dir, model_name)
+        os.makedirs(result_dir, exist_ok=True)
+        return result_dir
+
+    def log_model_summary(veni, result_dir=None):
+        pass
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
@@ -54,18 +85,6 @@ LEARNING_RATE = 2e-3  # learning rate
 SECOND_ORDER = True  # use second order dynamics
 PDF_THRESHOLD = 5  # PDF threshold for coefficient sparsification
 SEED = 42  # random seed for reproducibility
-
-
-def set_seed(seed):
-    """
-    Set seed for reproducibility in TensorFlow, NumPy, and Python's random module.
-
-    Args:
-        seed (int): The seed value to set.
-    """
-    tf.random.set_seed(seed)  # Set TensorFlow seed
-    np.random.seed(seed)  # Set NumPy seed
-    random.seed(seed)  # Set Python random seed
 
 
 def visualize_sample_data(t, x, dxdt, params, n_timesteps):
