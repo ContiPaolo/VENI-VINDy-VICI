@@ -1,27 +1,9 @@
-"""
-Reaction diffusion example - refactored to be modular (MEMS-like structure).
-This file was reorganized from a linear script into functions:
-- set_seed
-- load_data
-- create_model
-- train_model
-- perform_inference
-- perform_forward_uq
-- training_plots / uq_plots
-- main
-
-The intent is to keep runtime behavior but avoid doing heavy work at import-time so
-this module can be imported safely by tests or other scripts.
-"""
-
 import os
 import sys
 import logging
 import datetime
 import time
 import pickle
-import random
-import mat73
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -30,59 +12,20 @@ import tensorflow as tf
 # local imports
 from vindy import VENI
 from vindy.libraries import PolynomialLibrary
-from vindy.layers import SindyLayer, VindyLayer
+from vindy.layers import VindyLayer
 from vindy.distributions import Laplace
 from vindy.callbacks import SaveCoefficientsCallback
 from vindy.utils import switch_data_format
 from utils import load_reaction_diffusion_data
 
-# Add the examples folder to the Python path (keep compatibility with examples/ imports)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-# Import config (robust fallback for static analysis / tests)
-try:
-    import config
-except Exception:
-    config = None
+from examples.utils import (
+    set_seed,
+    plot_train_history,
+    plot_coefficients_train_history,
+    get_config,
+)
 
-# Import shared utilities
-try:
-    from utils import (
-        set_seed,
-        validate_data_path,
-        plot_train_history,
-        plot_coefficients_train_history,
-        create_result_directory,
-        log_model_summary,
-    )
-except ImportError:
-    # Fallback definitions if examples/utils.py not found
-    def set_seed(seed):
-        tf.random.set_seed(seed)
-        np.random.seed(seed)
-        random.seed(seed)
-
-    def validate_data_path(data_path, zenodo_doi="10.5281/zenodo.18313843"):
-        if not os.path.isfile(data_path):
-            raise FileNotFoundError(
-                f"Data file {data_path} not found. "
-                f"Please download the file from Zenodo (http://doi.org/{zenodo_doi}) and "
-                f"specify the correct path in the examples/config.py file."
-            )
-
-    def plot_train_history(trainhist, result_dir, validation=True):
-        pass
-
-    def plot_coefficients_train_history(trainhist, result_dir):
-        pass
-
-    def create_result_directory(base_dir, model_name):
-        result_dir = os.path.join(base_dir, model_name)
-        os.makedirs(result_dir, exist_ok=True)
-        return result_dir
-
-    def log_model_summary(veni, result_dir=None):
-        pass
-
+config = get_config()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
@@ -91,18 +34,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 # Default script constants (mirrors previous top-level script)
 # ----------------------
 MODEL_NAME = "reactiondiffusion"
-IDENTIFICATION_LAYER = "vindy"  # 'vindy' or 'sindy'
 REDUCED_ORDER = 2
 PCA_ORDER = 32
 NOISE = True
 NTH_TIME_STEP = 3
 SECOND_ORDER = False
+PRETRAINING = (
+    False  # pretrain for reconstruction only to stabilize training and avoid degene
+)
 
 BETA_VINDY = 1e-4
 BETA_VAE = 2e-5
 L_REC = 1e-2
 L_DZ = 4e0
 L_DX = 1e-2
+
+# PRETRAINED
+BETA_VINDY = 1e-4
+BETA_VAE = 2e-5
+L_REC = 1e-3
+L_DZ = 4e0
+L_DX = 1e-3
 
 RESULT_DIR = os.path.join(os.path.dirname(__file__), "results")
 
@@ -206,11 +158,9 @@ def train_model(
     )
     weights_path = os.path.join(
         result_dir,
-        f"{model_name}/{model_name}_{REDUCED_ORDER}_{veni.__class__.__name__}_{IDENTIFICATION_LAYER}.weights.h5",
+        f"{model_name}/{model_name}_{REDUCED_ORDER}_{veni.__class__.__name__}.weights.h5",
     )
-    train_histdir = os.path.join(
-        result_dir, f"{model_name}/trainhist_{IDENTIFICATION_LAYER}.npy"
-    )
+    train_histdir = os.path.join(result_dir, f"{model_name}/trainhist.npy")
 
     os.makedirs(os.path.dirname(weights_path), exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
@@ -689,7 +639,7 @@ def plot_rd_uq_imshow(
 
 
 def main():
-    set_seed(42)
+    set_seed(23)
 
     # Load data
     (
@@ -726,7 +676,7 @@ def main():
     # compile and build
     veni.compile(
         optimizer=tf.keras.optimizers.AdamW(learning_rate=1e-3),
-        sindy_optimizer=tf.keras.optimizers.AdamW(learning_rate=8e-4),
+        # sindy_optimizer=tf.keras.optimizers.AdamW(learning_rate=8e-4),
         loss="mse",
     )
     # determine batch size if not provided

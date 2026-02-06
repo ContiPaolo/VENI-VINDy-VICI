@@ -12,8 +12,6 @@ Model:
 """
 
 import os
-import sys
-import random
 import logging
 import numpy as np
 import tensorflow as tf
@@ -26,41 +24,18 @@ from vindy.layers import SindyLayer, VindyLayer
 from vindy.distributions import Laplace
 from vindy.callbacks import SaveCoefficientsCallback
 from vindy.utils import switch_data_format
-from utils import load_beam_data
-
-# Add the examples folder to the Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import config
+from examples.MEMS.utils import load_beam_data
 
 # Import shared utilities
-try:
-    from utils import (
-        set_seed,
-        plot_train_history,
-        plot_coefficients_train_history,
-        create_result_directory,
-        log_model_summary,
-    )
-except ImportError:
-    # Fallback definitions if examples/utils.py not found
-    def set_seed(seed):
-        tf.random.set_seed(seed)
-        np.random.seed(seed)
-        random.seed(seed)
+from examples.utils import (
+    set_seed,
+    plot_train_history,
+    plot_coefficients_train_history,
+    get_config,
+)
 
-    def plot_train_history(trainhist, result_dir, validation=True):
-        pass
-
-    def plot_coefficients_train_history(trainhist, result_dir):
-        pass
-
-    def create_result_directory(base_dir, model_name):
-        result_dir = os.path.join(base_dir, model_name)
-        os.makedirs(result_dir, exist_ok=True)
-        return result_dir
-
-    def log_model_summary(veni, result_dir=None):
-        pass
+# Import configuration (data paths)
+config = get_config()
 
 
 # Configure logging

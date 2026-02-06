@@ -13,6 +13,33 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 
 
+def get_config():
+    """
+    Import and return the config module.
+
+    This function handles the import of the examples config module with proper
+    error handling. Use this in your scripts to avoid repetitive import logic.
+
+    Returns:
+        module: The config module object.
+
+    Raises:
+        ImportError: If config.py doesn't exist or can't be imported.
+    """
+
+    try:
+        import examples.config as config
+
+        return config
+    except ImportError:
+        raise ImportError(
+            "Could not import config. "
+            "Please ensure that the examples/config.py file exists and is correctly configured. "
+            "You can copy examples/config.py.template to examples/config.py and customize it "
+            "with the correct data paths and parameters for your setup."
+        )
+
+
 def set_seed(seed: int):
     """
     Set seed for reproducibility in TensorFlow, NumPy, and Python's random module.
@@ -74,6 +101,7 @@ def plot_train_history(trainhist, result_dir, validation=True):
         ax.set_yscale("log")
 
         plt.tight_layout()
+        plt.show()
 
         # Save figure
         suffix = "_val" if validation else "_train"
@@ -98,16 +126,16 @@ def plot_coefficients_train_history(trainhist, result_dir):
         os.makedirs(result_dir, exist_ok=True)
 
         # Check if coefficient history is available
-        if "sindy_coefficients" not in trainhist:
+        if "coeffs_mean" not in trainhist:
             logging.warning("No SINDy coefficients found in training history")
             return
 
-        coeffs = np.array(trainhist["sindy_coefficients"])
+        coeffs = np.array(trainhist["coeffs_mean"])
 
         # Plot coefficient evolution
         fig, ax = plt.subplots(figsize=(12, 6))
 
-        n_coeffs = coeffs.shape[-1] if coeffs.ndim > 1 else 1
+        n_coeffs = coeffs.shape[1] if coeffs.ndim > 1 else 1
         for i in range(n_coeffs):
             if coeffs.ndim > 1:
                 ax.plot(coeffs[:, i], label=f"Coeff {i}", linewidth=1.5)
@@ -121,6 +149,7 @@ def plot_coefficients_train_history(trainhist, result_dir):
         ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
+        plt.show()
 
         save_path = os.path.join(result_dir, "coefficients_history.png")
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
