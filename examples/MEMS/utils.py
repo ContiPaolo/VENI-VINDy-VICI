@@ -267,5 +267,27 @@ def load_beam_data(
     )
 
 
+def switch_data_format(data, n_sims, n_timesteps):
+    """
+    Switch between vectorized data and simulation-wise data.
+
+    Args:
+        data (np.ndarray): The input data, either vectorized or simulation-wise.
+        n_sims (int): Number of simulations.
+        n_timesteps (int): Number of time steps per simulation.
+
+    Returns:
+        np.ndarray: The data in the switched format.
+    """
+    if data.ndim == 2 and data.shape[0] == n_sims * n_timesteps:
+        # Convert from vectorized to simulation-wise
+        return data.reshape(n_sims, n_timesteps, -1)
+    elif data.ndim == 3 and data.shape[0] == n_sims and data.shape[1] == n_timesteps:
+        # Convert from simulation-wise to vectorized
+        return data.reshape(-1, data.shape[-1])
+    else:
+        raise ValueError("Data shape does not match the expected dimensions.")
+
+
 if __name__ == "__main__":
     preprocess_data(noise_level=0.01, reduced_order=32)

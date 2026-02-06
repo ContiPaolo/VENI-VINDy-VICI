@@ -33,8 +33,12 @@ from vindy.libraries import PolynomialLibrary
 from vindy.layers import SindyLayer, VindyLayer
 from vindy.distributions import Laplace
 from vindy.callbacks import SaveCoefficientsCallback
-from vindy.utils import plot_train_history, plot_coefficients_train_history
-from utils import load_reaction_diffusion_data, switch_data_format
+from vindy.utils import (
+    plot_train_history,
+    plot_coefficients_train_history,
+    switch_data_format,
+)
+from utils import load_reaction_diffusion_data
 
 # Add the examples folder to the Python path (keep compatibility with examples/ imports)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

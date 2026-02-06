@@ -138,3 +138,122 @@ def plot_coefficients_train_history(history, outdir):
     plt.show()
     fig.savefig(os.path.join(outdir, "coefficients_history.png"))
     plt.close(fig)
+
+
+def switch_data_format(
+    data, n_sims, n_timesteps, spatial_shape=None, target_format="auto"
+):
+    """
+    Convert between vectorized (2D), simulation-wise flattened (3D), and full spatial (5D) data formats.
+
+    Parameters
+    - data: np.ndarray. One of:
+        * 2D: (n_sims * n_timesteps, features)
+        * 3D: (n_sims, n_timesteps, features)
+        * 5D: (n_sims, n_timesteps, Nx, Ny, channels)
+    - n_sims: int, number of simulations
+    - n_timesteps: int, timesteps per simulation
+    - spatial_shape: optional tuple describing spatial dims. Accepts (Nx, Ny, channels) or (N, channels) or (Nx, Ny).
+      When converting to/from 5D, this is required unless it can be inferred unambiguously from feature size.
+    - target_format: 'auto' (default), '2d', '3d', or '5d'. When 'auto', the function chooses a sensible target based on input.
+
+    Returns
+    - Converted np.ndarray in requested format.
+
+    Examples
+    - 2D -> 5D: provide spatial_shape=(Nx,Ny,channels) and target_format='5d'
+    - 5D -> 2D: target_format='2d' or rely on 'auto' to get 3D flattened by default
+    """
+    if data is None:
+        return None
+
+    if target_format not in ("auto", "2d", "3d", "5d"):
+        raise ValueError("target_format must be one of 'auto','2d','3d','5d'")
+
+    # Input is vectorized 2D: (n_sims * n_timesteps, features)
+    if data.ndim == 2 and data.shape[0] == n_sims * n_timesteps:
+        if target_format == "2d" or (target_format == "auto" and data.ndim == 2):
+            return data
+        features = data.shape[1]
+        if target_format == "5d":
+            if spatial_shape is None:
+                raise ValueError(
+                    "spatial_shape (Nx,Ny,channels) is required to reshape to 5D"
+                )
+            # accept (Nx,Ny,channels) or (N,channels)
+            if len(spatial_shape) == 3:
+                Nx, Ny, channels = spatial_shape
+            elif len(spatial_shape) == 2:
+                # (N, channels)
+                N, channels = spatial_shape
+                # try to factor N into Nx,Ny by assuming square grid
+                Nx = int(np.sqrt(N))
+                if Nx * Nx != N:
+                    raise ValueError(
+                        "Cannot infer Nx,Ny from N; provide (Nx,Ny,channels)"
+                    )
+                Ny = Nx
+            else:
+                raise ValueError("spatial_shape must be length 2 or 3")
+            if features != Nx * Ny * channels:
+                raise ValueError(
+                    f"Feature size {features} does not match provided spatial_shape {spatial_shape}"
+                )
+            return data.reshape(n_sims, n_timesteps, Nx, Ny, channels)
+        # default: to 3D flattened features
+        return data.reshape(n_sims, n_timesteps, -1)
+
+    # Input is simulation-wise flattened 3D: (n_sims, n_timesteps, features)
+    if data.ndim == 3 and data.shape[0] == n_sims and data.shape[1] == n_timesteps:
+        if target_format == "3d" or (
+            target_format == "auto" and data.ndim == 3 and spatial_shape is None
+        ):
+            return data
+        if target_format == "2d" or (
+            target_format == "auto" and data.ndim == 3 and spatial_shape is None
+        ):
+            return data.reshape(-1, data.shape[-1])
+        # convert to 5D
+        features = data.shape[2]
+        if spatial_shape is None:
+            # try infer square grid and single channel
+            Nx = int(np.sqrt(features))
+            if Nx * Nx == features:
+                Ny = Nx
+                channels = 1
+            else:
+                raise ValueError("spatial_shape required to reshape 3D to 5D")
+        else:
+            if len(spatial_shape) == 3:
+                Nx, Ny, channels = spatial_shape
+            elif len(spatial_shape) == 2:
+                N, channels = spatial_shape
+                Nx = int(np.sqrt(N))
+                if Nx * Nx != N:
+                    raise ValueError(
+                        "Cannot infer Nx,Ny from N; provide (Nx,Ny,channels)"
+                    )
+                Ny = Nx
+            else:
+                raise ValueError("spatial_shape must be length 2 or 3")
+            if features != Nx * Ny * channels:
+                raise ValueError(
+                    f"Feature size {features} does not match provided spatial_shape {spatial_shape}"
+                )
+        return data.reshape(n_sims, n_timesteps, Nx, Ny, channels)
+
+    # Input is full spatial 5D: (n_sims, n_timesteps, Nx, Ny, channels)
+    if data.ndim == 5 and data.shape[0] == n_sims and data.shape[1] == n_timesteps:
+        if target_format == "5d" or (target_format == "auto" and data.ndim == 5):
+            return data
+        # flatten to 3D
+        flat3 = data.reshape(n_sims, n_timesteps, -1)
+        if target_format == "3d" or (target_format == "auto"):
+            return flat3
+        # flatten to 2D
+        return flat3.reshape(-1, flat3.shape[-1])
+
+    # If none matched, raise
+    raise ValueError(
+        f'Data shape {getattr(data, "shape", None)} not compatible with n_sims={n_sims}, n_timesteps={n_timesteps}'
+    )
