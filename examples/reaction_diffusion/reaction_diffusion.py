@@ -243,39 +243,32 @@ def plot_latent_phase(z_true, z_mean_preds, test_ids, dims=(0, 1), figsize=(8, 6
     z_true: (n_sims, n_timesteps, state_dim)
     z_mean_preds: (n_sims, state_dim, n_timesteps) or list of arrays
     """
-    try:
-        for idx in test_ids:
-            zt = z_true[idx]  # time x state_dim
-            zm = z_mean_preds[idx]
-            # normalize shapes to (time, state_dim)
-            if zm.ndim == 2 and zm.shape[0] == zt.shape[0]:
-                zm_t = zm
-            else:
-                zm_t = zm.T
-            plt.figure(figsize=figsize)
-            plt.plot(
-                zt[:, dims[0]], zt[:, dims[1]], "-o", ms=3, label="Reference", alpha=0.7
-            )
-            plt.plot(
-                zm_t[:, dims[0]],
-                zm_t[:, dims[1]],
-                "--",
-                lw=2,
-                label="Mean pred",
-                alpha=0.9,
-            )
-            plt.scatter(
-                zt[0, dims[0]], zt[0, dims[1]], c="green", marker="s", label="start"
-            )
-            plt.xlabel(f"z[{dims[0]}]")
-            plt.ylabel(f"z[{dims[1]}]")
-            plt.title(f"Latent phase plot - sim {idx}")
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
-            plt.show()
-    except Exception as e:
-        logging.warning("plot_latent_phase failed: %s", e)
+    for idx in test_ids:
+        zt = z_true[idx]  # time x state_dim
+        zm = z_mean_preds[idx]
+        # normalize shapes to (time, state_dim)
+        plt.figure(figsize=figsize)
+        plt.plot(
+            zt[:, dims[0]], zt[:, dims[1]], "-o", ms=3, label="Reference", alpha=0.7
+        )
+        plt.plot(
+            zm[:, dims[0]],
+            zm[:, dims[1]],
+            "--",
+            lw=2,
+            label="Mean pred",
+            alpha=0.9,
+        )
+        plt.scatter(
+            zt[0, dims[0]], zt[0, dims[1]], c="green", marker="s", label="start"
+        )
+        plt.xlabel(f"z[{dims[0]}]")
+        plt.ylabel(f"z[{dims[1]}]")
+        plt.title(f"Latent phase plot - sim {idx}")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
 
 
 def plot_rd_uq_imshow(
@@ -300,141 +293,76 @@ def plot_rd_uq_imshow(
     - x_test_original: original spatial test data (n_sims, n_timesteps, Nx, Ny, nch)
     - spatial_shape: (Nx, Ny, nch)
     """
-    try:
-        Nx, Ny, nch = spatial_shape
-        n_sims, n_timesteps, _, _, _ = x_test_original.shape
-        if times_to_plot is None:
-            times_to_plot = [0, n_timesteps // 2, n_timesteps - 1]
+    Nx, Ny, nch = spatial_shape
+    n_sims, n_timesteps, _, _, _ = x_test_original.shape
+    if times_to_plot is None:
+        times_to_plot = [0, n_timesteps // 2, n_timesteps - 1]
 
-        for i_idx, idx in enumerate(test_ids):
-            # true field
-            x_true = x_test_original[idx]  # time x Nx x Ny x nch
+    for i_idx, idx in enumerate(test_ids):
+        # true field
+        x_true = x_test_original[idx]  # time x Nx x Ny x nch
 
-            # mean latent
-            z_mean = uq_results["mean_latent"][i_idx]
-            # ensure shape (time, state)
-            if z_mean.ndim == 2 and z_mean.shape[0] == n_timesteps:
-                z_mean_t = z_mean
-            else:
-                z_mean_t = z_mean.T
+        # mean latent
+        z_mean = uq_results["mean_latent"][i_idx]
 
-            # decode latent -> PCA-coordinates using the VENI decoder
-            # veni.decode expects input shape (n_samples, state_dim)
-            x_pca_mean = veni.decode(z_mean_t)
-            x_pca_mean = np.asarray(x_pca_mean)
+        # decode latent -> PCA-coordinates using the VENI decoder
+        x_pca_mean = veni.decode(z_mean).numpy()
 
-            # decoded outputs are in the model's scaled space -> rescale back to PCA coordinate space
-            try:
-                # use the model's rescale method (works with tensors/numpy)
-                x_pca_mean = veni.rescale(tf.convert_to_tensor(x_pca_mean)).numpy()
-            except Exception:
-                # fallback: try dividing by scale_factor if available as numpy
-                try:
-                    scale = np.array(veni.scale_factor)
-                    x_pca_mean = x_pca_mean / scale
-                except Exception:
-                    # last resort: leave as-is and hope scaling was not applied
-                    pass
+        # use the model's rescale method
+        x_pca_mean = veni.rescale(x_pca_mean).numpy()
 
-            # PCA inverse using provided PCA object
-            x_mean_phys = pca.inverse_transform(x_pca_mean)
-            x_mean_phys = x_mean_phys.reshape(n_timesteps, Nx, Ny, nch)
+        # PCA inverse using provided PCA object
+        x_mean_phys = pca.inverse_transform(x_pca_mean)
+        x_mean_phys = x_mean_phys.reshape(n_timesteps, Nx, Ny, nch)
 
-            # Diagnostics: compare decoded PCA coords (rescaled) to PCA coords of true field
-            try:
-                # compute true PCA coords from the reference full field
-                x_true_flat = x_true.reshape(n_timesteps, -1)  # (time, features)
-                pca_coords_true = pca.transform(x_true_flat)
+        # samples -> phys
+        samples = uq_results["latent_trajectories_samples"][
+            i_idx
+        ]  # (n_traj, time, state)
 
-                # ensure shapes align
-                if pca_coords_true.shape == x_pca_mean.shape:
-                    mae = np.mean(np.abs(pca_coords_true - x_pca_mean))
-                    max_err = np.max(np.abs(pca_coords_true - x_pca_mean))
-                    logging.info(
-                        "PCA-coords reconstruction error (sim %d): MAE=%.6f, max=%.6f",
-                        idx,
-                        mae,
-                        max_err,
-                    )
-                else:
-                    logging.debug(
-                        "PCA coords shape mismatch (true %s vs decoded %s)",
-                        pca_coords_true.shape,
-                        x_pca_mean.shape,
-                    )
+        # decode each sample from latent -> PCA coords, then PCA inverse to phys
+        phys_samples_list = []
+        for s in samples:
+            # s should be (time, state)
+            x_pca_s = veni.decode(s).numpy()
+            x_pca_s = veni.rescale(x_pca_s).numpy()
+            x_full_s = pca.inverse_transform(x_pca_s)
+            phys_samples_list.append(x_full_s.reshape(n_timesteps, Nx, Ny, nch))
+        phys_samples = np.stack(phys_samples_list, axis=0)
+        x_std_phys = np.std(phys_samples, axis=0)
 
-                # Compare physical fields statistics
-                true_min, true_max = x_true.min(), x_true.max()
-                rec_min, rec_max = x_mean_phys.min(), x_mean_phys.max()
-                logging.info(
-                    "Field ranges (sim %d): true[min, max]=[%.4f, %.4f] rec[min, max]=[%.4f, %.4f]",
-                    idx,
-                    true_min,
-                    true_max,
-                    rec_min,
-                    rec_max,
-                )
-            except Exception as e:
-                logging.debug("Diagnostics failed: %s", e)
+        for t_idx in times_to_plot:
+            if t_idx < 0 or t_idx >= n_timesteps:
+                continue
+            fig, axs = plt.subplots(1, 3, figsize=figsize)
+            vmin = min(
+                x_true[t_idx, :, :, channel].min(),
+                x_mean_phys[t_idx, :, :, channel].min(),
+            )
+            vmax = max(
+                x_true[t_idx, :, :, channel].max(),
+                x_mean_phys[t_idx, :, :, channel].max(),
+            )
 
-            # samples -> phys
-            samples = uq_results["latent_trajectories_samples"][
-                i_idx
-            ]  # (n_traj, time, state)
+            im0 = axs[0].imshow(
+                x_true[t_idx, :, :, channel], cmap=cmap, vmin=vmin, vmax=vmax
+            )
+            axs[0].set_title(f"Reference (sim {idx}) t={t_idx}")
+            plt.colorbar(im0, ax=axs[0])
 
-            # decode each sample from latent -> PCA coords, then PCA inverse to phys
-            phys_samples_list = []
-            for s in samples:
-                # s should be (time, state)
-                x_pca_s = veni.decode(s)
-                x_pca_s = np.asarray(x_pca_s)
-                try:
-                    x_pca_s = veni.rescale(tf.convert_to_tensor(x_pca_s)).numpy()
-                except Exception:
-                    try:
-                        scale = np.array(veni.scale_factor)
-                        x_pca_s = x_pca_s / scale
-                    except Exception:
-                        pass
-                x_full_s = pca.inverse_transform(x_pca_s)
-                phys_samples_list.append(x_full_s.reshape(n_timesteps, Nx, Ny, nch))
-            phys_samples = np.stack(phys_samples_list, axis=0)
-            x_std_phys = np.std(phys_samples, axis=0)
+            im1 = axs[1].imshow(
+                x_mean_phys[t_idx, :, :, channel], cmap=cmap, vmin=vmin, vmax=vmax
+            )
+            axs[1].set_title("Mean prediction")
+            plt.colorbar(im1, ax=axs[1])
 
-            for t_idx in times_to_plot:
-                if t_idx < 0 or t_idx >= n_timesteps:
-                    continue
-                fig, axs = plt.subplots(1, 3, figsize=figsize)
-                vmin = min(
-                    x_true[t_idx, :, :, channel].min(),
-                    x_mean_phys[t_idx, :, :, channel].min(),
-                )
-                vmax = max(
-                    x_true[t_idx, :, :, channel].max(),
-                    x_mean_phys[t_idx, :, :, channel].max(),
-                )
+            im2 = axs[2].imshow(x_std_phys[t_idx, :, :, channel], cmap="magma")
+            axs[2].set_title("Prediction std")
+            plt.colorbar(im2, ax=axs[2])
 
-                im0 = axs[0].imshow(
-                    x_true[t_idx, :, :, channel], cmap=cmap, vmin=vmin, vmax=vmax
-                )
-                axs[0].set_title(f"Reference (sim {idx}) t={t_idx}")
-                plt.colorbar(im0, ax=axs[0])
-
-                im1 = axs[1].imshow(
-                    x_mean_phys[t_idx, :, :, channel], cmap=cmap, vmin=vmin, vmax=vmax
-                )
-                axs[1].set_title("Mean prediction")
-                plt.colorbar(im1, ax=axs[1])
-
-                im2 = axs[2].imshow(x_std_phys[t_idx, :, :, channel], cmap="magma")
-                axs[2].set_title("Prediction std")
-                plt.colorbar(im2, ax=axs[2])
-
-                plt.suptitle(f"Simulation {idx} - time {t_idx}")
-                plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-                plt.show()
-    except Exception as e:
-        logging.warning("plot_rd_uq_imshow failed: %s", e)
+            plt.suptitle(f"Simulation {idx} - time {t_idx}")
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            plt.show()
 
 
 # ----------------------
