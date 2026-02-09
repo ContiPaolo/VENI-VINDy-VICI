@@ -65,27 +65,15 @@ def reshape_ae(data, n_timesteps, reduce=False):
 
 def load_reaction_diffusion_data(
     data_paths,
-    nth_time_step=1,
-    end_time_step=None,
     pca_order=64,
-    short=True,
-    pod=True,
     seed=123,
-    preprocess=False,
-    noise=True,
 ):
     """
     Load and preprocess reaction-diffusion data from a .mat file.
     Args:
         data_paths (str): Path to the .mat file containing the data.
-        nth_time_step (int): Step size for time reduction.
-        end_time_step (int or None): End time step for data slicing.
         pca_order (int): Number of principal components for PCA.
-        short (bool): Whether to use a shorter time series.
-        pod (bool): Whether to apply POD for dimensionality reduction.
         seed (int): Random seed for reproducibility.
-        preprocess (bool): Whether to apply preprocessing to the data.
-        noise (bool): Whether to add noise to the training data.
     Returns:
         times_train (np.ndarray): Training time data.
     """
@@ -130,7 +118,6 @@ def load_reaction_diffusion_data(
     logging.info("Performing PCA on the noisy data")
     pca = PCA(n_components=pca_order)
     pca.fit(x_train_2d)
-    V = pca.components_.T
 
     x_pca_2d = pca.transform(x_train_2d)
     x_rec_2d = pca.inverse_transform(x_pca_2d)
@@ -145,21 +132,8 @@ def load_reaction_diffusion_data(
     dxdt_2d = switch_data_format(
         dxdt_train, n_sims_train, n_timesteps_train, target_format="2d"
     )
-    dxdt_rec_2d = pca.inverse_transform(pca.transform(dxdt_2d))
-    dxdt_rec = switch_data_format(
-        dxdt_rec_2d,
-        n_sims_train,
-        n_timesteps_train,
-        spatial_shape=(Nx_hf, Ny_hf, n_channels),
-        target_format="5d",
-    )
-    plt.title("Noisy sample")
-    plt.imshow(dxdt_train[0, 0, :, :, 0])
-    plt.show()
-    plt.title("Rec sample")
-    plt.imshow(dxdt_rec[0, 0, :, :, 0])
-    plt.show()
 
+    # visualize a sample of the noisy data and its reconstruction to verify reshapes
     plt.title("Noisy sample")
     plt.imshow(x_train[0, 0, :, :, 0])
     plt.show()

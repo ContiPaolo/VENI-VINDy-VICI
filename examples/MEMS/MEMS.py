@@ -32,6 +32,7 @@ from examples.utils import (
     plot_train_history,
     plot_coefficients_train_history,
     get_config,
+    perform_forward_uq,
 )
 
 # Import configuration (data paths)
@@ -256,127 +257,6 @@ def train_model(veni, x_input, x_input_val, weights_path, log_dir, train_histdir
     return trainhist
 
 
-def perform_forward_uq(
-    veni,
-    x_test,
-    dxdt_test,
-    dxddt_test,
-    params_test,
-    t_test,
-    test_ids,
-    n_traj,
-    n_test,
-    n_timesteps_test,
-    sigma=3,
-):
-    """
-    Perform forward uncertainty quantification (UQ) by sampling SINDy coefficients
-    from the posterior distribution, integrating the ODE, and collecting trajectories.
-
-    Args:
-        veni: The trained VENI model.
-        x_test: Test data in the physical space.
-        dxdt_test: Test data derivatives.
-        dxddt_test: Test data second derivatives.
-        params_test: Test parameters.
-        t_test: Test time steps.
-        test_ids: List of test trajectory indices.
-        n_traj: Number of trajectories to sample for UQ.
-        n_test: Number of test trajectories.
-        n_timesteps_test: Number of timesteps in each test trajectory.
-        sigma: Standard deviation multiplier for uncertainty bounds.
-
-    Returns:
-        dict: A dictionary containing UQ results including mean, std, and trajectories.
-    """
-    X_test = switch_data_format(x_test, n_test, n_timesteps_test, target_format="3d")
-    DXDT_test = switch_data_format(
-        dxdt_test, n_test, n_timesteps_test, target_format="3d"
-    )
-    PARAMS_test = switch_data_format(
-        params_test, n_test, n_timesteps_test, target_format="3d"
-    )
-    t_test = switch_data_format(t_test, n_test, n_timesteps_test, target_format="3d")
-
-    # Calculate latent time derivatives
-    z_test, dzdt_test, dzddt_test = veni.calc_latent_time_derivatives(
-        x_test, dxdt_test, dxddt_test
-    )
-    z_test = switch_data_format(z_test, n_test, n_timesteps_test, target_format="3d")
-    dzdt_test = switch_data_format(
-        dzdt_test, n_test, n_timesteps_test, target_format="3d"
-    )
-
-    # Store the original coefficients
-    kernel_orig, kernel_scale_orig = (
-        veni.sindy_layer.kernel,
-        veni.sindy_layer.kernel_scale,
-    )
-
-    sampled_times = []
-    sampled_latent_trajectories = []
-    mean_latent_trajectories = []
-    for i_test in test_ids:
-        logging.info(f"Processing trajectory {i_test+1}/{n_test}")
-        traj_samples_latent = []
-        traj_samples_times = []
-        z0, dzdt0 = veni.calc_latent_time_derivatives(
-            X_test[i_test][0:1], DXDT_test[i_test][0:1]
-        )
-        for traj in range(n_traj):
-            logging.info(f"\tSampling model {traj+1}/{n_traj}")
-
-            # Sample from the posterior distribution of the coefficients and integrate the model
-            sol, coeffs = veni.sindy_layer.integrate_uq(
-                np.concatenate([z0, dzdt0]).squeeze(),
-                t_test[i_test].squeeze(),
-                mu=PARAMS_test[i_test],
-            )
-
-            traj_samples_latent.append(sol.y)
-            traj_samples_times.append(sol.t)
-        sampled_times.append(traj_samples_times)
-        sampled_latent_trajectories.append(traj_samples_latent)
-
-        # Mean simulation
-        veni.sindy_layer.kernel, veni.sindy_layer.kernel_scale = (
-            kernel_orig,
-            kernel_scale_orig,
-        )
-        z0, dzdt0 = veni.calc_latent_time_derivatives(
-            X_test[i_test][0:1], DXDT_test[i_test][0:1]
-        )
-        sol = veni.integrate(
-            np.concatenate([z0, dzdt0]).squeeze(),
-            t_test[i_test].squeeze(),
-            mu=PARAMS_test[i_test],
-        )
-        mean_latent_trajectories.append(sol.y)
-
-    # Calculate mean and variance of the trajectories
-    sampled_latent_trajectories = np.array(sampled_latent_trajectories)
-    mean_sampled_latent = np.mean(sampled_latent_trajectories, axis=1)
-    std_sampled_latent = np.std(sampled_latent_trajectories, axis=1)
-    mean_latent = np.array(mean_latent_trajectories)
-
-    # Calculate sigma bounds
-    lower_bound_latent = mean_latent - sigma * std_sampled_latent
-    upper_bound_latent = mean_latent + sigma * std_sampled_latent
-
-    # Return results
-    return {
-        "sampled_times": sampled_times,
-        "sampled_latent_trajectories": sampled_latent_trajectories,
-        "mean_sampled_latent": mean_sampled_latent,
-        "std_sampled_latent": std_sampled_latent,
-        "mean_latent": mean_latent,
-        "lower_bound_latent": lower_bound_latent,
-        "upper_bound_latent": upper_bound_latent,
-        "z_test": z_test,
-        "dzdt_test": dzdt_test,
-    }
-
-
 def training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni):
     """
     Generate training plots and visualizations.
@@ -508,11 +388,11 @@ def uq_plots(
         axs[i].set_title(f"Test Trajectory {i_test + 1}")
         # for i in range(2):
         axs[i].plot(t_test[i_test], z_test[i_test][:, 0], color="blue")
-        axs[i].plot(sampled_times[i][0], mean_latent[i][0], color="red", linestyle="--")
+        axs[i].plot(sampled_times[i][0], mean_latent[i], color="red", linestyle="--")
         axs[i].fill_between(
             sampled_times[i][0],
-            mean_sampled_latent[i][0] - 3 * std_sampled_latent[i][0],
-            mean_sampled_latent[i][0] + 3 * std_sampled_latent[i][0],
+            mean_sampled_latent[i][:, 0] - 3 * std_sampled_latent[i][:, 0],
+            mean_sampled_latent[i][:, 0] + 3 * std_sampled_latent[i][:, 0],
             color="red",
             alpha=0.3,
         )
@@ -642,26 +522,25 @@ def main():
     # UQ
     uq_results = perform_forward_uq(
         veni,
-        x_test_scaled,
-        dxdt_test_scaled,
-        dxddt_test_scaled,
-        params_test,
-        t_test,
         test_ids,
         n_traj,
         n_sims,
         n_timesteps_test,
-        REDUCED_ORDER,
+        t_test,
+        x_test_scaled,
+        dxdt_test_scaled,
+        dxddt_test_scaled,
+        params_test,
     )
 
     # Plot results
     uq_plots(
         uq_results["sampled_times"],
         uq_results["mean_latent"],
-        uq_results["mean_sampled_latent"],
-        uq_results["std_sampled_latent"],
+        uq_results["mean_latent_samples"],
+        uq_results["std_latent_samples"],
         switch_data_format(t_test, n_sims, n_timesteps_test, target_format="3d"),
-        uq_results["z_test"],
+        uq_results["z"],
         test_ids,
     )
 

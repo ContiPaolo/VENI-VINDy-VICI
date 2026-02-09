@@ -23,6 +23,7 @@ from examples.utils import (
     plot_train_history,
     plot_coefficients_train_history,
     get_config,
+    perform_forward_uq as perform_forward_uq_shared,
 )
 
 config = get_config()
@@ -219,7 +220,6 @@ def train_model(
 def training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni):
     """Plot training results and coefficient history."""
     try:
-        plot_train_history(trainhist, result_dir, validation=True)
         plot_train_history(trainhist, result_dir, validation=False)
         plot_coefficients_train_history(trainhist, result_dir)
 
@@ -296,6 +296,10 @@ def perform_inference(
     return np.array(z_preds), np.array(t_preds)
 
 
+# remove local perform_forward_uq implementation (we now use the shared one from examples.utils)
+# NOTE: keep a small wrapper for backward compatibility signature if necessary
+
+
 def perform_forward_uq(
     veni,
     x_test,
@@ -307,93 +311,22 @@ def perform_forward_uq(
     n_timesteps,
     sigma=3,
 ):
-    """Perform forward uncertainty quantification by sampling coefficients and integrating."""
-    # Try to switch data format to simulation-wise arrays
-    X_test = switch_data_format(x_test.numpy(), n_sims, n_timesteps, target_format="3d")
-    DXDT_test = switch_data_format(
-        dxdt_test.numpy(), n_sims, n_timesteps, target_format="3d"
+    """
+    Backwards-compatible wrapper that forwards to the shared perform_forward_uq in examples.utils.
+    """
+    return perform_forward_uq_shared(
+        veni,
+        x_test,
+        dxdt_test,
+        None,
+        None,
+        t_test,
+        test_ids,
+        n_traj,
+        n_sims,
+        n_timesteps,
+        sigma=sigma,
     )
-    T_test = switch_data_format(t_test, n_sims, n_timesteps, target_format="3d")
-
-    # Calculate latent time derivatives
-    z_test, dzdt_test = veni.calc_latent_time_derivatives(x_test, dxdt_test)
-    z_test = switch_data_format(z_test, n_sims, n_timesteps, target_format="3d")
-    dzdt_test = switch_data_format(dzdt_test, n_sims, n_timesteps, target_format="3d")
-
-    # Store the original coefficients
-    kernel_orig, kernel_scale_orig = (
-        veni.sindy_layer.kernel,
-        veni.sindy_layer.kernel_scale,
-    )
-
-    uq_ts = []
-    uq_ys = []
-    uq_means = []
-    for i_test in test_ids:
-        logging.info("Processing trajectory %d/%d for UQ", i_test + 1, len(test_ids))
-        sol_list = []
-        sol_list_t = []
-        for traj in range(n_traj):
-            logging.info("\tSample %d/%d", traj + 1, n_traj)
-            sol, coeffs = veni.sindy_layer.integrate_uq(
-                z_test[i_test][0], T_test[i_test].squeeze()
-            )
-            sol_list.append(sol.y)
-            sol_list_t.append(sol.t)
-
-        uq_ts.append(sol_list_t)
-        uq_ys.append(sol_list)
-
-        # mean simulation
-        veni.sindy_layer.kernel, veni.sindy_layer.kernel_scale = (
-            kernel_orig,
-            kernel_scale_orig,
-        )
-        z0, dzdt0 = veni.calc_latent_time_derivatives(
-            X_test[i_test][0:1], DXDT_test[i_test][0:1]
-        )
-        sol = veni.integrate(
-            z0.squeeze(),
-            T_test[i_test].squeeze(),
-        )
-        uq_means.append(sol.y)
-
-    uq_ys = np.array(uq_ys)
-    # uq_ys currently has shape (n_tests, n_traj, n_states, n_timesteps)
-    # transpose to (n_tests, n_traj, n_timesteps, n_states)
-    try:
-        uq_ys = np.transpose(uq_ys, (0, 1, 3, 2))
-    except Exception:
-        # fallback: if shape is already (n_tests, n_traj, n_timesteps, n_states)
-        pass
-
-    # now compute statistics across trajectories -> shapes (n_tests, n_timesteps, n_states)
-    uq_ys_mean_sampled = np.mean(uq_ys, axis=1)
-    uq_ys_std = np.std(uq_ys, axis=1)
-
-    # uq_means list contains mean simulations with shape (n_states, n_timesteps)
-    uq_ys_mean = np.array(uq_means)
-    try:
-        uq_ys_mean = np.transpose(uq_ys_mean, (0, 2, 1))
-    except Exception:
-        # if already (n_tests, n_timesteps, n_states), keep as is
-        pass
-
-    # compute bounds in (n_tests, n_timesteps, n_states)
-    uq_ys_lb = uq_ys_mean - sigma * uq_ys_std
-    uq_ys_ub = uq_ys_mean + sigma * uq_ys_std
-
-    return {
-        "uq_ts": uq_ts,
-        "uq_ys": uq_ys,
-        "uq_ys_mean_sampled": uq_ys_mean_sampled,
-        "uq_ys_std": uq_ys_std,
-        "uq_ys_mean": uq_ys_mean,
-        "uq_ys_lb": uq_ys_lb,
-        "uq_ys_ub": uq_ys_ub,
-        "z_test": z_test,
-        "dzdt_test": dzdt_test,
-    }
 
 
 def uq_plots(
@@ -405,7 +338,7 @@ def uq_plots(
         if n_test == 1:
             axs = [axs]
         for i, i_test in enumerate(test_ids):
-            # t_test[i_test] is (n_timesteps, ...) -> use flattened times
+            # t[i_test] is (n_timesteps, ...) -> use flattened times
             tvals = np.array(t_test[i_test]).squeeze()
             # z_test is (n_sims, n_timesteps, n_states)
             axs[i].plot(tvals, z_test[i_test][:, 0], color="blue")
@@ -701,10 +634,7 @@ def main():
     training_plots(trainhist, RESULT_DIR, x_train_scaled, x_test_scaled, veni)
 
     # Sparsify coefficients
-    try:
-        veni.sindy_layer.pdf_thresholding(threshold=0.1)
-    except Exception as e:
-        logging.warning("Sparsification failed: %s", e)
+    veni.sindy_layer.pdf_thresholding(threshold=0.1)
 
     # Inference + UQ
     logging.info("Performing inference and forward UQ...")
@@ -743,19 +673,16 @@ def main():
     )
 
     # New plots: latent phase and RD UQ images
-    try:
-        plot_latent_phase(uq_results["z_test"], uq_results["uq_ys_mean"], test_ids)
-        plot_rd_uq_imshow(
-            veni,
-            uq_results,
-            pca,
-            x_test_original,
-            test_ids,
-            spatial_shape,
-            channel=0,
-        )
-    except Exception as e:
-        logging.warning("Additional plotting failed: %s", e)
+    plot_latent_phase(uq_results["z_test"], uq_results["uq_ys_mean"], test_ids)
+    plot_rd_uq_imshow(
+        veni,
+        uq_results,
+        pca,
+        x_test_original,
+        test_ids,
+        spatial_shape,
+        channel=0,
+    )
 
     # Save some results to disk (best-effort)
     outdir = os.path.join(RESULT_DIR, MODEL_NAME)

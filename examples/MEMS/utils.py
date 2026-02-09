@@ -209,17 +209,17 @@ def load_beam_data(
         data = pickle.load(f)
         V = data["V"]
         time = data["t"]
-        time_test = data["t_test"]
+        time_test = data["t"]
         param = data["params"]
-        params_test = data["params_test"]
+        params_test = data["params"]
         ref_coords = data["ref_coords"]
 
         x = data["x"][:, :pca_order]
         dx_dt = data["dxdt"][:, :pca_order]
         dx_ddt = data["dxddt"][:, :pca_order]
-        x_test = data["x_test"][:, :pca_order]
-        dx_dt_test = data["dxdt_test"][:, :pca_order]
-        dx_ddt_test = data["dxddt_test"][:, :pca_order]
+        x_test = data["x"][:, :pca_order]
+        dx_dt_test = data["dxdt"][:, :pca_order]
+        dx_ddt_test = data["dxddt"][:, :pca_order]
 
         n_timesteps = data["n_timesteps"]
         n_sims = data["n_sims"]
