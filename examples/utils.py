@@ -8,6 +8,7 @@ This module contains common functions used across different example scripts
 import os
 import random
 import logging
+import datetime
 import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
@@ -225,18 +226,100 @@ def get_latent_initial_conditions(veni, x, dxdt, dxddt, mean_or_sample):
         not available).
     mean_or_sample: Whether to compute the mean initial condition or sample from the distribution ("mean" or "sample").
     """
-    z0, dz0, _ = veni.calc_latent_time_derivatives(
-        x, dxdt, dxddt, mean_or_sample=mean_or_sample
-    )
-    z0, dz0 = z0[0], dz0[0]  # remove batch dimension
-
-    # prepare initial condition for integration depending on whether second order
-    if veni.second_order is not None:
-        ic = np.concatenate([z0, dz0], axis=-1)
+    if veni.second_order:
+        z0, dz0, _ = veni.calc_latent_time_derivatives(
+            x, dxdt, dxddt, mean_or_sample=mean_or_sample
+        )
+        ic = np.concatenate(
+            [z0[0], dz0[0]], axis=-1
+        )  # remove batch dimension and concatenate
     else:
-        ic = z0
+        z0, dz0 = veni.calc_latent_time_derivatives(
+            x, dxdt, None, mean_or_sample=mean_or_sample
+        )
+        ic = z0[0]  # remove batch dimension
 
     return ic
+
+
+def perform_inference(
+    veni,
+    sim_ids,
+    n_sims,
+    n_timesteps,
+    t,
+    x,
+    dxdt=None,
+    params=None,
+):
+    """
+    Perform inference on test trajectories and plot the results.
+
+    Args:
+        veni: The trained VENI model.
+        x: Scaled test data.
+        dxdt: Scaled test data derivatives.
+        t: Test time steps.
+        params: Test parameters.
+        sim_ids: List of test trajectory indices.
+        n_sims: Number of simulations.
+        n_timesteps: Number of timesteps in each test trajectory.
+
+    Returns:
+        Tuple: Predicted trajectories and their corresponding time steps.
+    """
+    # Reshape data into simulation-wise format
+    T = switch_data_format(t, n_sims, n_timesteps, target_format="3d")
+    z, dzdt = veni.calc_latent_time_derivatives(x, dxdt)
+    Z = switch_data_format(z, n_sims, n_timesteps, target_format="3d")
+    DZDT = switch_data_format(dzdt, n_sims, n_timesteps, target_format="3d")
+    Params = switch_data_format(params, n_sims, n_timesteps, target_format="3d")
+
+    z_preds = []
+    t_preds = []
+    start_time = datetime.datetime.now()
+    for i, j in enumerate(sim_ids):
+        logging.info(f"Processing trajectory {i+1}/{len(sim_ids)}")
+        # Perform integration
+        sol = veni.integrate(
+            np.concatenate([Z[j, 0], DZDT[j, 0]]).squeeze(),
+            T[j].squeeze(),
+            mu=Params[j],
+        )
+        z_preds.append(sol.y)
+        t_preds.append(sol.t)
+    end_time = datetime.datetime.now()
+    logging.info(
+        f"Inference time: {(end_time - start_time).total_seconds()/len(sim_ids):.2f} seconds per trajectory"
+    )
+
+    # Convert predictions to arrays
+    z_preds = np.array(z_preds)
+    t_preds = np.array(t_preds)
+
+    return Z, z_preds, t_preds
+
+
+def plot_inference_results(t_preds, z_preds, T, Z, sim_ids, state_id=0):
+
+    # Plot inference results
+    fig, axs = plt.subplots(len(sim_ids), 1, figsize=(12, 12), sharex=True)
+    fig.suptitle(f"Inference of Test Trajectories")
+    for i, j in enumerate(sim_ids):
+        axs[i].set_title(f"Test Trajectory {j}")
+        axs[i].plot(T[j], Z[j][:, state_id], color="blue", label="True")
+        axs[i].plot(
+            t_preds[i],
+            z_preds[i][state_id],
+            color="red",
+            linestyle="--",
+            label="Predicted",
+        )
+        axs[i].set_xlabel("$t$")
+        axs[i].set_ylabel("$z$")
+        axs[i].legend()
+    plt.tight_layout()
+    plt.show()
 
 
 def perform_forward_uq(
@@ -271,9 +354,9 @@ def perform_forward_uq(
 
 
     Returns a dictionary with keys identical to the MEMS implementation:
-    sampled_times, sampled_latent_trajectories, mean_sampled_latent,
-    std_sampled_latent, mean_latent, lower_bound_latent, upper_bound_latent,
-    z_test, dzdt_test
+    sampled_times, sampled_latent_trajectories, mean_latent_samples,
+    std_latent_samples, mean_latent, lower_bound_latent, upper_bound_latent,
+    z, dzdt_test
     """
 
     second_order = veni.second_order
@@ -309,7 +392,10 @@ def perform_forward_uq(
     )
 
     # compute latent derivatives from the provided (possibly vectorized) arrays
-    z, dzdt, dzddt = veni.calc_latent_time_derivatives(x, dxdt, dxddt)
+    if second_order:
+        z, dzdt, _ = veni.calc_latent_time_derivatives(x, dxdt, dxddt)
+    else:
+        z, dzdt = veni.calc_latent_time_derivatives(x, dxdt, None)
 
     # ensure z and dzdt have simulation-wise shapes (n_sims, n_timesteps, n_states)
     Z = switch_data_format(_to_numpy(z), n_sims, n_timesteps, target_format="3d")
@@ -334,6 +420,13 @@ def perform_forward_uq(
         # time vector for integration
         tvec = T[i].squeeze()
 
+        # Get initial conditions in physical space for the first timestep of each simulation
+        x0, dx0dt0, dx0ddt0 = (
+            X[i, 0:1],
+            DXDT[i, 0:1],
+            DXDDT[i, 0:1] if second_order else None,
+        )
+
         # sampling
         traj_samples = []
         traj_times = []
@@ -342,7 +435,7 @@ def perform_forward_uq(
 
             # sample initial condition
             ic = get_latent_initial_conditions(
-                veni, X[i, 0:1], DXDT[i, 0:1], DXDDT[i, 0:1], mean_or_sample="sample"
+                veni, x0, dx0dt0, dx0ddt0, mean_or_sample="sample"
             )
 
             sol, coeffs = veni.sindy_layer.integrate_uq(ic, tvec, mu=mu)
@@ -360,7 +453,7 @@ def perform_forward_uq(
         )
         # mean initial condition (using mean prediction from encoder)
         ic = get_latent_initial_conditions(
-            veni, X[i, 0:1], DXDT[i, 0:1], DXDDT[i, 0:1], mean_or_sample="sample"
+            veni, x0, dx0dt0, dx0ddt0, mean_or_sample="sample"
         )
 
         sol_mean = veni.integrate(ic, tvec, mu=mu)
@@ -396,3 +489,55 @@ def perform_forward_uq(
         "z": Z,
         "dzdt": DZDT,
     }
+
+
+def uq_plots(
+    sampled_times,
+    mean_latent,
+    mean_latent_samples,
+    std_latent_samples,
+    t_test,
+    z_test,
+    test_ids,
+    state_id=0,
+):
+    """
+    Generate UQ plots.
+
+    Args:
+        sampled_times (list): Time points for sampled UQ trajectories.
+        mean_latent (list): Mean trajectories from deterministic integration.
+        mean_latent_samples (list): Mean of sampled trajectories.
+        std_latent_samples (list): Standard deviation of sampled trajectories.
+        t_test (np.ndarray): Test time steps.
+        z_test (np.ndarray): Latent states for test data.
+        test_ids (list): List of test trajectory indices to plot.
+    """
+    n_test = len(test_ids)
+    # plot the mean and 3*std of the trajectories
+    fig, axs = plt.subplots(n_test, 1, figsize=(12, 12), sharex=True)
+    fig.suptitle(f"Integrated Test Trajectories")
+    for i, i_test in enumerate(test_ids):
+        axs[i].set_title(f"Test Trajectory {i_test + 1}")
+        # for i in range(2):
+        axs[i].plot(t_test[i_test], z_test[i_test][:, state_id], color="blue")
+        axs[i].plot(
+            sampled_times[i][0],
+            mean_latent[i, :, state_id],
+            color="red",
+            linestyle="--",
+        )
+        axs[i].fill_between(
+            sampled_times[i][0],
+            mean_latent_samples[i][:, state_id]
+            - 3 * std_latent_samples[i][:, state_id],
+            mean_latent_samples[i][:, state_id]
+            + 3 * std_latent_samples[i][:, state_id],
+            color="red",
+            alpha=0.3,
+        )
+        axs[i].set_xlabel("$t$")
+        axs[i].set_ylabel("$z$")
+
+    plt.tight_layout()
+    plt.show()

@@ -23,7 +23,9 @@ from examples.utils import (
     plot_train_history,
     plot_coefficients_train_history,
     get_config,
-    perform_forward_uq as perform_forward_uq_shared,
+    perform_inference,
+    perform_forward_uq,
+    uq_plots,
 )
 
 config = get_config()
@@ -234,129 +236,6 @@ def training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni):
         logging.warning("Unable to create training plots: %s", e)
 
 
-def perform_inference(
-    veni,
-    x_test_scaled,
-    dxdt_test_scaled,
-    t_test,
-    test_ids,
-    n_sims,
-    n_timesteps,
-):
-    """Perform inference on test trajectories and plot results."""
-    T_test = switch_data_format(t_test, n_sims, n_timesteps, target_format="3d")
-    z_test, dzdt_test = veni.calc_latent_time_derivatives(
-        x_test_scaled, dxdt_test_scaled
-    )
-    z_test = switch_data_format(z_test, n_sims, n_timesteps, target_format="3d")
-
-    z_preds = []
-    t_preds = []
-    start_time = datetime.datetime.now()
-    for i, i_test in enumerate(test_ids):
-        logging.info("Processing trajectory %d/%d", i + 1, len(test_ids))
-        # Perform integration
-        sol = veni.integrate(
-            z_test[i_test, 0],
-            T_test[i_test].squeeze(),
-        )
-        z_preds.append(sol.y)
-        t_preds.append(sol.t)
-    end_time = datetime.datetime.now()
-    logging.info(
-        "Inference time: %.2f seconds per trajectory",
-        (end_time - start_time).total_seconds() / max(1, len(test_ids)),
-    )
-
-    # Plot simple results
-    try:
-        fig, axs = plt.subplots(
-            len(test_ids), 1, figsize=(12, 6 * len(test_ids)), sharex=True
-        )
-        if len(test_ids) == 1:
-            axs = [axs]
-        for i, i_test in enumerate(test_ids):
-            axs[i].plot(
-                T_test[i_test], z_test[i_test][:, 0], color="blue", label="True"
-            )
-            axs[i].plot(
-                t_preds[i],
-                z_preds[i][0],
-                color="red",
-                linestyle="--",
-                label="Predicted",
-            )
-            axs[i].set_xlabel("$t$")
-            axs[i].set_ylabel("$z$")
-            axs[i].legend()
-        plt.show()
-    except Exception as e:
-        logging.warning("Inference plotting failed: %s", e)
-
-    return np.array(z_preds), np.array(t_preds)
-
-
-# remove local perform_forward_uq implementation (we now use the shared one from examples.utils)
-# NOTE: keep a small wrapper for backward compatibility signature if necessary
-
-
-def perform_forward_uq(
-    veni,
-    x_test,
-    dxdt_test,
-    t_test,
-    test_ids,
-    n_traj,
-    n_sims,
-    n_timesteps,
-    sigma=3,
-):
-    """
-    Backwards-compatible wrapper that forwards to the shared perform_forward_uq in examples.utils.
-    """
-    return perform_forward_uq_shared(
-        veni,
-        x_test,
-        dxdt_test,
-        None,
-        None,
-        t_test,
-        test_ids,
-        n_traj,
-        n_sims,
-        n_timesteps,
-        sigma=sigma,
-    )
-
-
-def uq_plots(
-    uq_ts, uq_ys_mean, uq_ys_mean_sampled, uq_ys_std, t_test, z_test, test_ids
-):
-    try:
-        n_test = len(test_ids)
-        fig, axs = plt.subplots(n_test, 1, figsize=(12, 6 * n_test), sharex=True)
-        if n_test == 1:
-            axs = [axs]
-        for i, i_test in enumerate(test_ids):
-            # t[i_test] is (n_timesteps, ...) -> use flattened times
-            tvals = np.array(t_test[i_test]).squeeze()
-            # z_test is (n_sims, n_timesteps, n_states)
-            axs[i].plot(tvals, z_test[i_test][:, 0], color="blue")
-            # uq_ys_mean, uq_ys_mean_sampled, uq_ys_std have shape (n_tests, n_timesteps, n_states)
-            axs[i].plot(tvals, uq_ys_mean[i][:, 0], color="red", linestyle="--")
-            axs[i].fill_between(
-                tvals,
-                uq_ys_mean_sampled[i][:, 0] - 3 * uq_ys_std[i][:, 0],
-                uq_ys_mean_sampled[i][:, 0] + 3 * uq_ys_std[i][:, 0],
-                color="red",
-                alpha=0.3,
-            )
-        plt.tight_layout()
-        plt.show()
-    except Exception as e:
-        logging.warning("UQ plotting failed: %s", e)
-
-
 def plot_latent_phase(z_true, z_mean_preds, test_ids, dims=(0, 1), figsize=(8, 6)):
     """
     Phase plot of latent variables for selected test trajectories.
@@ -426,23 +305,12 @@ def plot_rd_uq_imshow(
         if times_to_plot is None:
             times_to_plot = [0, n_timesteps // 2, n_timesteps - 1]
 
-        # helper: latent (time,state) -> physical (time,features)
-        def latent_to_phys(traj_time_state, V, pca_mean):
-            # traj_time_state: (time, state_dim)
-            # V: features x components -> reconstruct features = traj @ V.T + mean
-            if V.shape[1] != traj_time_state.shape[1]:
-                # accept V transposed
-                if V.shape[0] == traj_time_state.shape[1]:
-                    return traj_time_state.dot(V).astype(np.float32)
-                raise ValueError("Incompatible V shape vs latent dim")
-            return traj_time_state.dot(V.T) + pca_mean
-
         for i_idx, idx in enumerate(test_ids):
             # true field
             x_true = x_test_original[idx]  # time x Nx x Ny x nch
 
             # mean latent
-            z_mean = uq_results["uq_ys_mean"][i_idx]
+            z_mean = uq_results["mean_latent"][i_idx]
             # ensure shape (time, state)
             if z_mean.ndim == 2 and z_mean.shape[0] == n_timesteps:
                 z_mean_t = z_mean
@@ -509,7 +377,9 @@ def plot_rd_uq_imshow(
                 logging.debug("Diagnostics failed: %s", e)
 
             # samples -> phys
-            samples = uq_results["uq_ys"][i_idx]  # (n_traj, time, state)
+            samples = uq_results["latent_trajectories_samples"][
+                i_idx
+            ]  # (n_traj, time, state)
 
             # decode each sample from latent -> PCA coords, then PCA inverse to phys
             phys_samples_list = []
@@ -653,27 +523,27 @@ def main():
 
     uq_results = perform_forward_uq(
         veni,
-        x_test_scaled,
-        dxdt_test_scaled,
-        t_test,
         test_ids,
         n_traj,
         n_sims_test,
         n_timesteps_test,
+        t_test,
+        x_test_scaled,
+        dxdt_test_scaled,
     )
 
     uq_plots(
-        uq_results["uq_ts"],
-        uq_results["uq_ys_mean"],
-        uq_results["uq_ys_mean_sampled"],
-        uq_results["uq_ys_std"],
+        uq_results["sampled_times"],
+        uq_results["mean_latent"],
+        uq_results["mean_latent_samples"],
+        uq_results["std_latent_samples"],
         switch_data_format(t_test, n_sims_test, n_timesteps_test, target_format="3d"),
-        uq_results["z_test"],
+        uq_results["z"],
         test_ids,
     )
 
     # New plots: latent phase and RD UQ images
-    plot_latent_phase(uq_results["z_test"], uq_results["uq_ys_mean"], test_ids)
+    plot_latent_phase(uq_results["z"], uq_results["mean_latent"], test_ids)
     plot_rd_uq_imshow(
         veni,
         uq_results,
@@ -683,23 +553,6 @@ def main():
         spatial_shape,
         channel=0,
     )
-
-    # Save some results to disk (best-effort)
-    outdir = os.path.join(RESULT_DIR, MODEL_NAME)
-    os.makedirs(outdir, exist_ok=True)
-    save_path = os.path.join(outdir, f"save_data_{MODEL_NAME}.pkl")
-    try:
-        save_data = {
-            "uq_ts": uq_results.get("uq_ts"),
-            "z_pred_mean": uq_results.get("uq_ys_mean"),
-            "z_pred_ub": uq_results.get("uq_ys_ub"),
-            "z_pred_lb": uq_results.get("uq_ys_lb"),
-        }
-        with open(save_path, "wb") as f:
-            pickle.dump(save_data, f)
-        logging.info("Saved UQ results to %s", save_path)
-    except Exception as e:
-        logging.warning("Failed to save results: %s", e)
 
 
 if __name__ == "__main__":

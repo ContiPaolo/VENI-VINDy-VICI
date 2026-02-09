@@ -32,7 +32,10 @@ from examples.utils import (
     plot_train_history,
     plot_coefficients_train_history,
     get_config,
+    perform_inference,
+    plot_inference_results,
     perform_forward_uq,
+    uq_plots,
 )
 
 # Import configuration (data paths)
@@ -269,7 +272,6 @@ def training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni):
     """
     # Plot training history
     plot_train_history(trainhist, result_dir, validation=True)
-    plot_train_history(trainhist, result_dir, validation=False)
     plot_coefficients_train_history(trainhist, result_dir)
 
     # reconstruction of PCA trajectories
@@ -278,128 +280,6 @@ def training_plots(trainhist, result_dir, x_train_scaled, x_test_scaled, veni):
 
     # visualize identified coefficients
     veni.sindy_layer.visualize_coefficients(x_range=[-1.5, 1.5])
-    plt.show()
-
-
-def perform_inference(
-    veni,
-    x_test_scaled,
-    dxdt_test_scaled,
-    t_test,
-    params_test,
-    test_ids,
-    n_sims,
-    n_timesteps_test,
-):
-    """
-    Perform inference on test trajectories and plot the results.
-
-    Args:
-        veni: The trained VENI model.
-        x_test_scaled: Scaled test data.
-        dxdt_test_scaled: Scaled test data derivatives.
-        t_test: Test time steps.
-        params_test: Test parameters.
-        test_ids: List of test trajectory indices.
-        n_sims: Number of simulations.
-        n_timesteps_test: Number of timesteps in each test trajectory.
-
-    Returns:
-        Tuple: Predicted trajectories and their corresponding time steps.
-    """
-    # Reshape data into simulation-wise format
-    T_test = switch_data_format(t_test, n_sims, n_timesteps_test, target_format="3d")
-    z_test, dzdt_test = veni.calc_latent_time_derivatives(
-        x_test_scaled, dxdt_test_scaled
-    )
-    z_test = switch_data_format(z_test, n_sims, n_timesteps_test, target_format="3d")
-    dzdt_test = switch_data_format(
-        dzdt_test, n_sims, n_timesteps_test, target_format="3d"
-    )
-    Params_test = switch_data_format(
-        params_test, n_sims, n_timesteps_test, target_format="3d"
-    )
-
-    z_preds = []
-    t_preds = []
-    start_time = datetime.datetime.now()
-    for i, i_test in enumerate(test_ids):
-        logging.info(f"Processing trajectory {i+1}/{len(test_ids)}")
-        # Perform integration
-        sol = veni.integrate(
-            np.concatenate([z_test[i_test, 0], dzdt_test[i_test, 0]]).squeeze(),
-            T_test[i_test].squeeze(),
-            mu=Params_test[i_test],
-        )
-        z_preds.append(sol.y)
-        t_preds.append(sol.t)
-    end_time = datetime.datetime.now()
-    logging.info(
-        f"Inference time: {(end_time - start_time).total_seconds()/len(test_ids):.2f} seconds per trajectory"
-    )
-
-    # Convert predictions to arrays
-    z_preds = np.array(z_preds)
-    t_preds = np.array(t_preds)
-
-    # Plot inference results
-    fig, axs = plt.subplots(len(test_ids), 1, figsize=(12, 12), sharex=True)
-    fig.suptitle(f"Inference of Test Trajectories")
-    for i, i_test in enumerate(test_ids):
-        axs[i].set_title(f"Test Trajectory {i_test + 1}")
-        axs[i].plot(T_test[i_test], z_test[i_test][:, 0], color="blue", label="True")
-        axs[i].plot(
-            t_preds[i], z_preds[i][0], color="red", linestyle="--", label="Predicted"
-        )
-        axs[i].set_xlabel("$t$")
-        axs[i].set_ylabel("$z$")
-        axs[i].legend()
-    plt.show()
-
-    return z_preds, t_preds
-
-
-def uq_plots(
-    sampled_times,
-    mean_latent,
-    mean_sampled_latent,
-    std_sampled_latent,
-    t_test,
-    z_test,
-    test_ids,
-):
-    """
-    Generate UQ plots.
-
-    Args:
-        sampled_times (list): Time points for sampled UQ trajectories.
-        mean_latent (list): Mean trajectories from deterministic integration.
-        mean_sampled_latent (list): Mean of sampled trajectories.
-        std_sampled_latent (list): Standard deviation of sampled trajectories.
-        t_test (np.ndarray): Test time steps.
-        z_test (np.ndarray): Latent states for test data.
-        test_ids (list): List of test trajectory indices to plot.
-    """
-    n_test = len(test_ids)
-    # plot the mean and 3*std of the trajectories
-    fig, axs = plt.subplots(n_test, 1, figsize=(12, 12), sharex=True)
-    fig.suptitle(f"Integrated Test Trajectories")
-    for i, i_test in enumerate(test_ids):
-        axs[i].set_title(f"Test Trajectory {i_test + 1}")
-        # for i in range(2):
-        axs[i].plot(t_test[i_test], z_test[i_test][:, 0], color="blue")
-        axs[i].plot(sampled_times[i][0], mean_latent[i], color="red", linestyle="--")
-        axs[i].fill_between(
-            sampled_times[i][0],
-            mean_sampled_latent[i][:, 0] - 3 * std_sampled_latent[i][:, 0],
-            mean_sampled_latent[i][:, 0] + 3 * std_sampled_latent[i][:, 0],
-            color="red",
-            alpha=0.3,
-        )
-        axs[i].set_xlabel("$t$")
-        axs[i].set_ylabel("$z$")
-
-    plt.tight_layout()
     plt.show()
 
 
@@ -508,16 +388,18 @@ def main():
 
     # VICI
     # Inference
-    z_preds, t_preds = perform_inference(
+    Z, z_preds, t_preds = perform_inference(
         veni,
-        x_test_scaled,
-        dxdt_test_scaled,
-        t_test,
-        params_test,
         test_ids,
         n_sims,
         n_timesteps_test,
+        t_test,
+        x_test_scaled,
+        dxdt_test_scaled,
+        params_test,
     )
+    T = switch_data_format(t_test, n_sims, n_timesteps_test, target_format="3d")
+    plot_inference_results(t_preds, z_preds, T, Z, test_ids)
 
     # UQ
     uq_results = perform_forward_uq(
