@@ -24,6 +24,7 @@ from examples.utils import (
     plot_coefficients_train_history,
     get_config,
     perform_inference,
+    plot_inference_results,
     perform_forward_uq,
     uq_plots,
 )
@@ -511,15 +512,17 @@ def main():
     n_traj = 10
     test_ids = list(range(n_sims_test))
 
-    z_preds, t_preds = perform_inference(
+    Z, z_preds, t_preds = perform_inference(
         veni,
-        x_test_scaled,
-        dxdt_test_scaled,
-        t_test,
         test_ids,
         n_sims_test,
         n_timesteps_test,
+        t_test,
+        x_test_scaled,
+        dxdt_test_scaled,
     )
+    T = switch_data_format(t_test, n_sims_test, n_timesteps_test, target_format="3d")
+    plot_inference_results(t_preds, z_preds, T, Z, test_ids)
 
     uq_results = perform_forward_uq(
         veni,

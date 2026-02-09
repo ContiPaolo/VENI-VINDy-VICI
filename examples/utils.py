@@ -281,10 +281,11 @@ def perform_inference(
     for i, j in enumerate(sim_ids):
         logging.info(f"Processing trajectory {i+1}/{len(sim_ids)}")
         # Perform integration
+        ic = np.concatenate([Z[j, 0], DZDT[j, 0]]) if veni.second_order else Z[j, 0]
         sol = veni.integrate(
-            np.concatenate([Z[j, 0], DZDT[j, 0]]).squeeze(),
+            ic,
             T[j].squeeze(),
-            mu=Params[j],
+            mu=Params[j] if params is not None else None,
         )
         z_preds.append(sol.y)
         t_preds.append(sol.t)
