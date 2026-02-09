@@ -47,7 +47,7 @@ def preprocess_data(noise_level=0.02, reduced_order=32, plots=False):
         V,
         n_sims,
         n_timesteps,
-    ) = load_beam_data(
+    ) = load_mems_data(
         config.beam,
         nth_time_step=1,
         pca_order=4,
@@ -178,7 +178,7 @@ def preprocess_data(noise_level=0.02, reduced_order=32, plots=False):
         plt.semilogy(pca.singular_values_)
 
 
-def load_beam_data(
+def load_mems_data(
     data_paths,
     nth_time_step=1,
     end_time_step=None,

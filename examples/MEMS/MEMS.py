@@ -24,7 +24,7 @@ from vindy.layers import SindyLayer, VindyLayer
 from vindy.distributions import Laplace
 from vindy.callbacks import SaveCoefficientsCallback
 from vindy.utils import switch_data_format
-from examples.MEMS.utils import load_beam_data
+from examples.MEMS.utils import load_mems_data
 
 # Import shared utilities
 from examples.utils import (
@@ -307,7 +307,7 @@ def main():
         V,
         n_sims,
         n_timesteps,
-    ) = load_beam_data(
+    ) = load_mems_data(
         config.beam,
         end_time_step=END_TIME_STEP,
         nth_time_step=NTH_TIME_STEP,
